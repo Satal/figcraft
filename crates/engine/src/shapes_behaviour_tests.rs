@@ -583,7 +583,7 @@ fn outline_stroke_outlines_a_text_without_a_stroke() {
     let out = ex(&mut s, "vector.outlineStroke", json!({"ids": [t]}));
     let ids: Vec<NodeId> = out["ids"].as_array().unwrap().iter().filter_map(id_of).collect();
     // Without a font nothing lays out, so there is nothing to outline.
-    if !figcraft_text::layout_node(&before).is_some_and(|(l, _)| !l.glyphs.is_empty()) {
+    if figcraft_text::layout_node(&before).is_none_or(|(l, _)| l.glyphs.is_empty()) {
         assert!(ids.is_empty() && matches!(node(&s, t).kind, NodeKind::Text(_)), "no glyphs: the text stays: {out}");
         return;
     }
