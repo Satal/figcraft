@@ -583,7 +583,7 @@ one undo step and returns the ids it made:
 - `board.setLanguage {id?, ids?, language}` → `{ids}`: the language of the given (or selected, or edited)
   code blocks, by id or name (`cpp` or `C++`).
 - `board.shape {shape, x, y, width?, height?, text?, color?, parent?}` → `{id, text}`: a shape with centred,
-  wrapping text: `rectangle roundedRectangle ellipse diamond triangle triangleDown parallelogramRight parallelogramLeft trapezoid pentagon hexagon octagon star plus arrowLeft arrowRight chevron speechBubble database document predefinedProcess manualInput internalStorage`.
+  wrapping text: `rectangle roundedRectangle ellipse diamond triangle triangleDown parallelogramRight parallelogramLeft trapezoid pentagon hexagon octagon star plus arrowLeft arrowRight chevron speechBubble database document predefinedProcess manualInput internalStorage stadium doubleCircle trapezoidDown delay card flag`.
 - `board.connector {from, to, fromSide?, toSide?, fromAt?, toAt?, style?: straight|elbow|curved, startCap?, endCap?, label?}`
   → `{id, label?}`: `from`/`to` are layer ids or `{x, y}` page points; sides are `auto` (the side
   facing the other end) or `top right bottom left`; `fromAt`/`toAt` are `[x, y]` fractions of the

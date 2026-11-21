@@ -160,7 +160,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "board.shape",
             "Shape with text",
-            "{shape: rectangle|roundedRectangle|ellipse|diamond|triangle|triangleDown|parallelogramRight|parallelogramLeft|trapezoid|pentagon|hexagon|octagon|star|plus|arrowLeft|arrowRight|chevron|speechBubble|database|document|predefinedProcess|manualInput|internalStorage, x, y, width?, height? (default 160), text?, color?, parent?} → {id, text}",
+            "{shape: rectangle|roundedRectangle|ellipse|diamond|triangle|triangleDown|parallelogramRight|parallelogramLeft|trapezoid|pentagon|hexagon|octagon|star|plus|arrowLeft|arrowRight|chevron|speechBubble|database|document|predefinedProcess|manualInput|internalStorage|stadium|doubleCircle|trapezoidDown|delay|card|flag, x, y, width?, height? (default 160), text?, color?, parent?} → {id, text}",
             true,
             shape_cmd
         ),

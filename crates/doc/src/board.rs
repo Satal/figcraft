@@ -192,10 +192,17 @@ pub enum BoardShape {
     PredefinedProcess,
     ManualInput,
     InternalStorage,
+    // Added for flowcharts (imported ones too): after the others, so the picker's order holds.
+    Stadium,
+    DoubleCircle,
+    TrapezoidDown,
+    Delay,
+    Card,
+    Flag,
 }
 
 impl BoardShape {
-    pub const ALL: [BoardShape; 23] = [
+    pub const ALL: [BoardShape; 29] = [
         BoardShape::Rectangle,
         BoardShape::RoundedRectangle,
         BoardShape::Ellipse,
@@ -219,6 +226,12 @@ impl BoardShape {
         BoardShape::PredefinedProcess,
         BoardShape::ManualInput,
         BoardShape::InternalStorage,
+        BoardShape::Stadium,
+        BoardShape::DoubleCircle,
+        BoardShape::TrapezoidDown,
+        BoardShape::Delay,
+        BoardShape::Card,
+        BoardShape::Flag,
     ];
 
     /// The id used in commands and saved files, and the English name shown in the UI.
@@ -247,6 +260,12 @@ impl BoardShape {
             BoardShape::PredefinedProcess => ("predefinedProcess", "Predefined process"),
             BoardShape::ManualInput => ("manualInput", "Manual input"),
             BoardShape::InternalStorage => ("internalStorage", "Internal storage"),
+            BoardShape::Stadium => ("stadium", "Stadium"),
+            BoardShape::DoubleCircle => ("doubleCircle", "Double circle"),
+            BoardShape::TrapezoidDown => ("trapezoidDown", "Trapezoid down"),
+            BoardShape::Delay => ("delay", "Delay"),
+            BoardShape::Card => ("card", "Card"),
+            BoardShape::Flag => ("flag", "Flag"),
         }
     }
 
@@ -310,6 +329,42 @@ impl BoardShape {
             BoardShape::Document => document(w, h),
             BoardShape::PredefinedProcess => with_lines(w, h, &[[0.1, 0.0, 0.1, 1.0], [0.9, 0.0, 0.9, 1.0]]),
             BoardShape::InternalStorage => with_lines(w, h, &[[0.12, 0.0, 0.12, 1.0], [0.0, 0.12, 1.0, 0.12]]),
+            // Round ends as wide as the box is high (or as high as it is wide, standing up).
+            BoardShape::Stadium => RoundedRect::new(0.0, 0.0, w, h, r / 2.0).to_path(0.1),
+            BoardShape::DoubleCircle => {
+                // Two rings: the inner one drawn as a line inside the outer.
+                let mut p = Ellipse::from_rect(Rect::new(0.0, 0.0, w, h)).to_path(0.1);
+                let g = r * 0.07;
+                p.extend(Ellipse::from_rect(Rect::new(g, g, w - g, h - g)).to_path(0.1));
+                p
+            }
+            BoardShape::TrapezoidDown => poly(&[(0.0, 0.0), (1.0, 0.0), (0.8, 1.0), (0.2, 1.0)]),
+            BoardShape::Delay => {
+                // Flat on the left, a half-round on the right.
+                let rx = (w / 2.0).min(h / 2.0);
+                let (k, ky) = (rx * QUARTER, h / 2.0 * QUARTER);
+                let mut p = BezPath::new();
+                p.move_to((0.0, 0.0));
+                p.line_to((w - rx, 0.0));
+                p.curve_to((w - rx + k, 0.0), (w, h / 2.0 - ky), (w, h / 2.0));
+                p.curve_to((w, h / 2.0 + ky), (w - rx + k, h), (w - rx, h));
+                p.line_to((0.0, h));
+                p.close_path();
+                p
+            }
+            BoardShape::Card => {
+                // A rectangle with its top-left corner cut off.
+                let c = r * 0.22;
+                let mut p = BezPath::new();
+                p.move_to((c, 0.0));
+                p.line_to((w, 0.0));
+                p.line_to((w, h));
+                p.line_to((0.0, h));
+                p.line_to((0.0, c));
+                p.close_path();
+                p
+            }
+            BoardShape::Flag => poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.22, 0.5)]),
             BoardShape::SpeechBubble => {
                 // A rounded body over the bottom fifth, with a tail down to the left.
                 let (b, c) = (h * 0.8, r * 0.14);
@@ -356,6 +411,12 @@ impl BoardShape {
             BoardShape::PredefinedProcess => [0.08, 0.14, 0.08, 0.14],
             BoardShape::ManualInput => [0.3, 0.08, 0.08, 0.08],
             BoardShape::InternalStorage => [0.18, 0.08, 0.08, 0.18],
+            BoardShape::Stadium => [0.08, 0.2, 0.08, 0.2],
+            BoardShape::DoubleCircle => [0.2, 0.2, 0.2, 0.2],
+            BoardShape::TrapezoidDown => [0.08, 0.22, 0.1, 0.22],
+            BoardShape::Delay => [0.08, 0.25, 0.08, 0.08],
+            BoardShape::Card => [0.12, 0.08, 0.08, 0.12],
+            BoardShape::Flag => [0.08, 0.08, 0.08, 0.24],
         }
     }
 }
