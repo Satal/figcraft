@@ -1,6 +1,8 @@
 //! The crate's integration tests, built as one test binary.
 
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod board_routing;
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod empty_text_box_undo;
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::disallowed_methods)]
 mod library_style_acceptance;

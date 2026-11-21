@@ -1,10 +1,10 @@
 //! A connector's path reshaped by hand: a selected connector's path handles (one for each run of
 //! an elbow, one for a curve), dragged, and `board.reshape`, which a drag ends in.
 
-use figcraft_doc::{attached_sides, path_handles, reshaped};
+use figcraft_doc::{attached_sides, path_handles, reshaped_around};
 
 use super::connectors::{END_HANDLE_PX, connector_of, selected_connector_ends};
-use super::derived::{place_route, route, route_ends};
+use super::derived::{obstacles, obstacles_for, place_route, route, route_ends};
 use super::{
     BoardItem, Connector, Document, End, Gesture, NodeId, Point, PointerEvent, Result, Session, Side, Value, bad, json, req_num, req_targets, require,
 };
@@ -24,7 +24,10 @@ fn pinned(end: End, side: Option<Side>) -> End {
 /// Connector `c` with `portion` of its path moved to `p` (`None`: it has no such portion).
 fn moved(doc: &Document, c: &Connector, portion: usize, p: Point) -> Option<Connector> {
     let (from, to) = route_ends(doc, c)?;
-    let path = reshaped(from, to, c.routing, c.path.as_ref(), portion, p)?;
+    // The portions are those of the route as drawn, around the objects in its way.
+    let page = [c.from.node(), c.to.node()].into_iter().flatten().find_map(|n| doc.page_of(n));
+    let around = obstacles_for(doc, c, &page.map(|pg| obstacles(doc, pg)).unwrap_or_default());
+    let path = reshaped_around(from, to, c.routing, c.path.as_ref(), portion, p, &around)?;
     let (s0, s1) = attached_sides(from, to);
     Some(Connector { from: pinned(c.from, s0), to: pinned(c.to, s1), routing: c.routing, path: Some(path), branch: c.branch })
 }

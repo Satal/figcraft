@@ -31,7 +31,10 @@ pub mod vector_regions;
 pub use board::*;
 pub use board_code::*;
 pub use board_mindmap::{MIND_GAP_X, MIND_GAP_Y, MIND_MAX_DEPTH, MIND_MAX_NODES, MindBox, mind_layout};
-pub use board_route::{END_GAP, MAX_RUNS, RouteEnd, attach_points, attached_sides, path_handles, reshaped, route_along, route_points};
+pub use board_route::{
+    END_GAP, MAX_OBSTACLES, MAX_RUNS, RouteEnd, attach_points, attached_sides, path_handles, reshaped, reshaped_around, route_along, route_around,
+    route_points,
+};
 pub use colors::*;
 pub use comments::*;
 pub use facilitation::*;

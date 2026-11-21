@@ -52,6 +52,59 @@ pub fn route_points(from: RouteEnd, to: RouteEnd, routing: Routing) -> Option<Ve
 /// [`route_points`] for a connector whose `path` may have been reshaped by hand (a path that isn't
 /// for its `routing` is ignored).
 pub fn route_along(from: RouteEnd, to: RouteEnd, routing: Routing, path: Option<&ConnectorPath>) -> Option<Vec<Point>> {
+    route_around(from, to, routing, path, &[])
+}
+
+/// Most objects an elbow goes around besides the ones it joins: on a page with more, elbows go
+/// around only what they join, as before, and routing stays quick.
+pub const MAX_OBSTACLES: usize = 400;
+
+/// [`route_along`] for an elbow that also keeps out of the other objects' `obstacles` (their page
+/// boxes): its usual route when that is clear of them, else the shortest right-angled way around
+/// them (by length and turns), leaving and arriving by the same sides. A path shaped by hand is the
+/// user's and is kept; an end placed on a point of an object, more than [`MAX_OBSTACLES`]
+/// obstacles, or no way around them, keep the usual route.
+pub fn route_around(from: RouteEnd, to: RouteEnd, routing: Routing, path: Option<&ConnectorPath>, obstacles: &[Rect]) -> Option<Vec<Point>> {
+    let shaped = matches!(path, Some(ConnectorPath::Runs { .. }));
+    if routing != Routing::Elbow || shaped || obstacles.is_empty() || obstacles.len() > MAX_OBSTACLES {
+        return route_unblocked(from, to, routing, path);
+    }
+    let usual = route_unblocked(from, to, routing, path)?;
+    if !crosses(&usual, obstacles) {
+        return Some(usual);
+    }
+    Some(around(from, to, obstacles).unwrap_or(usual))
+}
+
+/// The elbow from `from` to `to` around `obstacles` (`None`: none found, or an end placed by hand).
+fn around(from: RouteEnd, to: RouteEnd, obstacles: &[Rect]) -> Option<Vec<Point>> {
+    use craft_graph_layout as gl;
+    let gl_rect = |r: Rect| gl::Rect::new(r.x0, r.y0, r.width().max(0.0), r.height().max(0.0));
+    let gl_side = |s: Side| match s {
+        Side::Top => Some(gl::Side::Top),
+        Side::Right => Some(gl::Side::Right),
+        Side::Bottom => Some(gl::Side::Bottom),
+        Side::Left => Some(gl::Side::Left),
+        Side::Auto => None,
+    };
+    // The port is the box grown by the end gap, so the route starts where an attached one does.
+    let port = |e: RouteEnd, other: Point| match e {
+        RouteEnd::Point(p) => Some(gl::Port { rect: gl::Rect::new(p.x, p.y, 0.0, 0.0), side: None, point: None }),
+        RouteEnd::Box(b, side) => {
+            Some(gl::Port { rect: gl_rect(b.inflate(END_GAP, END_GAP)), side: gl_side(named_or_facing(b, side, other)), point: None })
+        }
+        RouteEnd::On(..) => None,
+    };
+    let (a, b) = (port(from, to.centre())?, port(to, from.centre())?);
+    let rects: Vec<gl::Rect> = obstacles.iter().map(|r| gl_rect(*r)).collect();
+    let opts = gl::RouteOptions { clearance: ROOM / 2.0, ..gl::RouteOptions::default() };
+    let pts = gl::route_orthogonal(&a, &b, &rects, &opts).ok().flatten()?;
+    let pts = tidy(pts.into_iter().map(|p| Point::new(p.x, p.y)).collect());
+    (pts.len() >= 2 && pts.iter().all(|p| p.x.is_finite() && p.y.is_finite()) && !crosses(&pts, obstacles)).then_some(pts)
+}
+
+/// [`route_along`] with no obstacles but the objects the connector joins.
+fn route_unblocked(from: RouteEnd, to: RouteEnd, routing: Routing, path: Option<&ConnectorPath>) -> Option<Vec<Point>> {
     let (p0, s0) = attach(from, to.centre());
     let (p1, s1) = attach(to, from.centre());
     let pts = match (routing, path) {
@@ -92,13 +145,27 @@ pub fn path_handles(pts: &[Point], routing: Routing) -> Vec<(usize, Point)> {
 /// last run stays on its end through an extra run; a curve's middle moves there. `None` for a
 /// straight connector, a portion it doesn't have, or a path of too many runs.
 pub fn reshaped(from: RouteEnd, to: RouteEnd, routing: Routing, path: Option<&ConnectorPath>, portion: usize, p: Point) -> Option<ConnectorPath> {
+    reshaped_around(from, to, routing, path, portion, p, &[])
+}
+
+/// [`reshaped`] for a connector routed around `obstacles` (see [`route_around`]): the portions
+/// are those of the route as drawn.
+pub fn reshaped_around(
+    from: RouteEnd,
+    to: RouteEnd,
+    routing: Routing,
+    path: Option<&ConnectorPath>,
+    portion: usize,
+    p: Point,
+    obstacles: &[Rect],
+) -> Option<ConnectorPath> {
     match routing {
         Routing::Straight => None,
         Routing::Curved => {
             let m = curve_middle(&route_points(from, to, routing)?)?;
             Some(ConnectorPath::Bow { x: p.x - m.x, y: p.y - m.y })
         }
-        Routing::Elbow => reshaped_runs(&route_along(from, to, routing, path)?, portion, p),
+        Routing::Elbow => reshaped_runs(&route_around(from, to, routing, path, obstacles)?, portion, p),
     }
 }
 

@@ -34,18 +34,37 @@ pub(crate) fn settle_text(doc: &mut Document, before: &Document, touched: &BTree
 /// After layout: connectors run between their ends again (an end whose layer is gone stays where
 /// it was), one moved on its own takes its free ends along, and labels sit at their middles. Only
 /// the connectors and labels an edit can have moved are looked at: touched themselves, or with a
-/// touched (or gone) end, connector or layer around them.
+/// touched (or gone) end, connector or layer around them; and elbows near an object that moved,
+/// appeared or went (they go around the objects on their page).
 pub(crate) fn settle_routes(doc: &mut Document, before: &Document, touched: &BTreeSet<NodeId>) {
     if !is_board(doc) || touched.is_empty() {
         return;
     }
     let hit = |doc: &Document, id: NodeId| touched.contains(&id) || doc.ancestors(id).iter().any(|a| touched.contains(a));
+    // Where objects elbows go around were before the edit and are now, for those it touched.
+    let mut moved: Vec<Rect> = Vec::new();
+    for n in doc.nodes().filter(|n| is_obstacle(n) && hit(doc, n.id)) {
+        moved.extend(before.world_bounds(n.id).into_iter().chain(doc.world_bounds(n.id)));
+    }
+    for &id in touched.iter().filter(|id| !doc.contains(**id)) {
+        if before.node(id).is_some_and(is_obstacle) {
+            moved.extend(before.world_bounds(id));
+        }
+    }
+    let near_moved = |doc: &Document, id: NodeId, c: &Connector| {
+        c.routing == Routing::Elbow
+            && !matches!(c.path, Some(figcraft_doc::ConnectorPath::Runs { .. }))
+            && doc.world_bounds(id).is_some_and(|b| {
+                let b = b.inflate(AROUND, AROUND);
+                moved.iter().any(|m| m.x0 < b.x1 && b.x0 < m.x1 && m.y0 < b.y1 && b.y0 < m.y1)
+            })
+    };
     let (mut connectors, mut labels) = (Vec::new(), Vec::new());
     for n in doc.nodes() {
         match &n.board {
             Some(BoardItem::Connector(c)) => {
                 let ends = [c.from.node(), c.to.node()].into_iter().flatten();
-                if hit(doc, n.id) || ends.into_iter().any(|e| !doc.contains(e) || hit(doc, e)) {
+                if hit(doc, n.id) || ends.into_iter().any(|e| !doc.contains(e) || hit(doc, e)) || near_moved(doc, n.id, c) {
                     connectors.push((n.id, c.clone()));
                 }
             }
@@ -54,12 +73,17 @@ pub(crate) fn settle_routes(doc: &mut Document, before: &Document, touched: &BTr
         }
     }
     let rerouted: BTreeSet<NodeId> = connectors.iter().map(|(id, _)| *id).collect();
+    let mut pages: std::collections::BTreeMap<NodeId, Vec<(NodeId, Rect)>> = std::collections::BTreeMap::new();
     for (id, mut c) in connectors {
         let changed = detach_gone_ends(doc, id, &mut c) | carry_free_ends(doc, before, touched, id, &mut c);
         if changed && let Some(n) = doc.node_mut(id) {
             n.board = Some(BoardItem::Connector(c.clone()));
         }
-        if let Some(pts) = route(doc, &c) {
+        let obstacles = match doc.page_of(id) {
+            Some(page) => pages.entry(page).or_insert_with(|| obstacles(doc, page)).as_slice(),
+            None => &[],
+        };
+        if let Some(pts) = route_among(doc, &c, obstacles) {
             place_route(doc, id, &pts, c.routing);
         }
     }
@@ -276,10 +300,72 @@ pub(super) fn place_route(doc: &mut Document, id: NodeId, pts: &[Point], routing
 }
 
 /// The page points connector `c` runs through (see [`figcraft_doc::route_points`]): from the
-/// middle of the side of each attached layer facing the other end (or the side it names).
+/// middle of the side of each attached layer facing the other end (or the side it names), an elbow
+/// going around the other objects on the page (see [`figcraft_doc::route_around`]).
 pub fn route(doc: &Document, c: &Connector) -> Option<Vec<Point>> {
+    let page = [c.from.node(), c.to.node()].into_iter().flatten().find_map(|n| doc.page_of(n));
+    let obstacles = match page {
+        Some(page) if c.routing == Routing::Elbow => obstacles(doc, page),
+        _ => Vec::new(),
+    };
+    route_among(doc, c, &obstacles)
+}
+
+/// How near an elbow (its box) an object that moved must be for it to be routed again.
+const AROUND: f64 = 48.0;
+
+/// The objects elbows go around: board objects with a box of their own (stickies, shapes, tables,
+/// mind map nodes, code blocks), not connectors, their labels, stamps or ink.
+fn is_obstacle(n: &figcraft_doc::Node) -> bool {
+    n.visible
+        && matches!(
+            n.board,
+            Some(BoardItem::Sticky { .. } | BoardItem::Shape { .. } | BoardItem::Table | BoardItem::MindNode | BoardItem::CodeBlock { .. })
+        )
+}
+
+/// The objects on `page` elbows go around, with their page boxes. Past [`figcraft_doc::MAX_OBSTACLES`]
+/// none are listed: elbows then go around only what they join.
+pub(super) fn obstacles(doc: &Document, page: NodeId) -> Vec<(NodeId, Rect)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<NodeId> = doc.node(page).map(|p| p.children.to_vec()).unwrap_or_default();
+    while let Some(id) = stack.pop() {
+        let Some(n) = doc.node(id) else { continue };
+        if !n.visible {
+            continue;
+        }
+        if is_obstacle(n) {
+            if out.len() >= figcraft_doc::MAX_OBSTACLES {
+                return Vec::new();
+            }
+            out.extend(doc.world_bounds(id).map(|b| (id, b)));
+            // What a board object holds (its text, a table's cells) is part of it.
+            continue;
+        }
+        stack.extend(n.children.iter().copied());
+    }
+    out
+}
+
+/// [`route`] with the page's `obstacles` given: those other than the connector's ends (and what
+/// holds them).
+pub(super) fn route_among(doc: &Document, c: &Connector, obstacles: &[(NodeId, Rect)]) -> Option<Vec<Point>> {
     let (from, to) = route_ends(doc, c)?;
-    figcraft_doc::route_along(from, to, c.routing, c.path.as_ref())
+    let rects = obstacles_for(doc, c, obstacles);
+    figcraft_doc::route_around(from, to, c.routing, c.path.as_ref(), &rects)
+}
+
+/// The boxes of `obstacles` connector `c` goes around: all but its ends and what holds them.
+pub(super) fn obstacles_for(doc: &Document, c: &Connector, obstacles: &[(NodeId, Rect)]) -> Vec<Rect> {
+    if c.routing != Routing::Elbow || obstacles.is_empty() {
+        return Vec::new();
+    }
+    let mut skip: BTreeSet<NodeId> = BTreeSet::new();
+    for e in [c.from.node(), c.to.node()].into_iter().flatten() {
+        skip.insert(e);
+        skip.extend(doc.ancestors(e));
+    }
+    obstacles.iter().filter(|(id, _)| !skip.contains(id)).map(|(_, r)| *r).collect()
 }
 
 /// Connector `c`'s ends as they are now.

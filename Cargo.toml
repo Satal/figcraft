@@ -17,6 +17,10 @@ craft-xml = { version = "0.1.0", git = "https://github.com/storytold/craft-libs"
 craft-svg = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a49329e71e32ad93794ab595c41f33209a7d2220", default-features = false, features = ["tree"] }
 craft-vectordrawable = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a49329e71e32ad93794ab595c41f33209a7d2220" }
 craft-pdf = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a49329e71e32ad93794ab595c41f33209a7d2220" }
+# Flowchart import and diagram layout/routing. Path deps while those crates are in review: each
+# becomes the craft-libs git rev above after those crates merge.
+craft-mermaid = { path = "../craft-libs-mermaid/crates/mermaid" }
+craft-graph-layout = { path = "../craft-libs/crates/graph-layout" }
 # internal
 figcraft-geom = { path = "crates/geom" }
 figcraft-color = { path = "crates/color" }
