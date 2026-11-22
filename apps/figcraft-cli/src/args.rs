@@ -80,7 +80,8 @@ pub struct InfoArgs {
 /// <OUT> is a folder: one file per top-level frame of the page. An <OUT> with an image extension,
 /// or --node, writes one file. `fig` (or an <OUT> ending in .fig) writes the whole file as .fig,
 /// experimental: other apps may not open every file. `penpot` (or an <OUT> ending in .penpot)
-/// writes the whole file as a Penpot 2.x archive. The format comes from --format, else <OUT>'s
+/// writes the whole file as a Penpot 2.x archive. `vsdx` (or an <OUT> ending in .vsdx) writes a
+/// board's page (--page) as a VSDX drawing. The format comes from --format, else <OUT>'s
 /// extension, else png.
 #[derive(Args)]
 pub struct ExportArgs {
@@ -90,7 +91,7 @@ pub struct ExportArgs {
     /// The folder or file to write
     #[arg(short = 'o', long = "out", value_name = "OUT")]
     pub out: String,
-    /// png, jpg, svg, webp, pdf, xml (Android Vector Drawable), fig or penpot
+    /// png, jpg, svg, webp, pdf, xml (Android Vector Drawable), fig, penpot or vsdx (a board page)
     #[arg(long, value_name = "FORMAT", value_parser = format)]
     pub format: Option<String>,
     #[command(flatten)]
@@ -137,7 +138,7 @@ pub struct ScaleArg {
     pub scale: f64,
 }
 
-/// Convert by extension (.figcraft, .json, .svg, .png, .jpg, .webp, .pdf, .fig, .penpot)
+/// Convert by extension (.figcraft, .json, .svg, .png, .jpg, .webp, .pdf, .fig, .penpot, .vsdx)
 #[derive(Args)]
 pub struct ConvertArgs {
     /// The document to read
@@ -281,7 +282,7 @@ enum ValueError {
     Bleed,
     #[error("expected bestEffort, exact or ignore")]
     VdCompat,
-    #[error("expected png, jpg, svg, webp, pdf, xml, fig or penpot")]
+    #[error("expected png, jpg, svg, webp, pdf, xml, fig, penpot or vsdx")]
     Format,
     #[error("expected whole numbers, like 1000,10_000")]
     WholeNumber,
@@ -305,7 +306,7 @@ fn vd_compat(s: &str) -> Result<VdCompat, ValueError> {
 fn format(s: &str) -> Result<String, ValueError> {
     let f = s.to_ascii_lowercase();
     match f.as_str() {
-        "png" | "jpg" | "jpeg" | "svg" | "webp" | "pdf" | "xml" | "fig" | "penpot" => Ok(f),
+        "png" | "jpg" | "jpeg" | "svg" | "webp" | "pdf" | "xml" | "fig" | "penpot" | "vsdx" => Ok(f),
         _ => Err(ValueError::Format),
     }
 }

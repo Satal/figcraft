@@ -89,6 +89,7 @@ pub(super) fn export(s: &mut Session, p: &Value) -> Result<Value> {
     match whole_file.as_str() {
         "fig" => return export_fig(s, p),
         "penpot" => return export_penpot(s, p),
+        "vsdx" => return crate::board::export_vsdx(s, p),
         _ => {}
     }
     let doc = s.doc()?;

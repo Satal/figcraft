@@ -85,6 +85,12 @@ pub(crate) fn open(s: &mut Session, p: &Value) -> Result<Value> {
         revert(s)?;
         return Ok(json!({"index": i, "reloaded": true}));
     }
+    if ext(&path) == "vsdx" {
+        let bytes = read(&path)?;
+        let out = open_vsdx(s, &bytes, &path)?;
+        remember(s, &path);
+        return Ok(out);
+    }
     // Stamped before reading: a change made during the read makes the next save refuse.
     let on_disk = crate::library::stat(&path).ok();
     let (loaded, rest) = load_path(&path, variables.as_ref())?;
@@ -138,6 +144,9 @@ fn open_data(s: &mut Session, data: &str, p: &Value, variables: Option<&Value>) 
     let name = req_string("file.open", p, "name")?;
     let data = data.split_once(',').map_or(data, |(_, b)| b);
     let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| bad("file.open", e.to_string()))?;
+    if ext(&name) == "vsdx" {
+        return open_vsdx(s, &bytes, &name);
+    }
     let (loaded, rest) = load_with(&bytes, &name, variables, &figcraft_format::rest::no_images)?;
     let warnings = rest || matches!(ext(&name).as_str(), "svg" | "penpot");
     let summary = import_summary(&loaded.doc);
@@ -146,6 +155,25 @@ fn open_data(s: &mut Session, data: &str, p: &Value, variables: Option<&Value>) 
     let mut out = json!({"index": s.active, "summary": summary});
     out[if warnings { "warnings" } else { "repairs" }] = json!(loaded.issues);
     Ok(out)
+}
+
+/// A VSDX drawing opened as a new board, named after file `name`; nothing is left open when it
+/// can't be read.
+fn open_vsdx(s: &mut Session, bytes: &[u8], name: &str) -> Result<Value> {
+    let (active, tabs) = (s.active, s.docs.len());
+    let spec = crate::cmd::find_command("file.newBoard").ok_or_else(|| EngineError::UnknownCommand("file.newBoard".into()))?;
+    (spec.run)(s, &json!({"name": file_stem(name)}))?;
+    match crate::board::import_bytes(s, bytes, 0, None) {
+        Ok(imported) => {
+            let warnings = imported.get("warnings").cloned().unwrap_or_else(|| json!([]));
+            Ok(json!({"index": s.active, "imported": imported, "warnings": warnings}))
+        }
+        Err(e) => {
+            s.docs.truncate(tabs);
+            s.active = active.min(s.docs.len().saturating_sub(1));
+            Err(e)
+        }
+    }
 }
 
 pub(super) fn import(s: &mut Session, p: &Value) -> Result<Value> {
@@ -166,6 +194,15 @@ pub(super) fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let (x, y) = (num(p, "x"), num(p, "y"));
     let center = s.ds().map(|d| (d.view.cx, d.view.cy)).unwrap_or((0.0, 0.0));
     match ext(&name).as_str() {
+        "vsdx" => {
+            // Into a board only; File ▸ Open makes one from a drawing.
+            crate::board::require(s, "file.import")?;
+            let at = match (x, y) {
+                (Some(x), Some(y)) => Some((x, y)),
+                _ => None,
+            };
+            crate::board::import_bytes(s, &bytes, 0, at)
+        }
         "svg" => {
             let doc = s.doc_mut()?;
             let (x, y) = (x.unwrap_or(center.0), y.unwrap_or(center.1));

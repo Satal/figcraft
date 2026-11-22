@@ -147,13 +147,13 @@ pub(crate) fn bar_width(app: &FigApp) -> f32 {
 fn main_width(groups: &[Group], board: bool) -> f32 {
     let tools: f32 = groups.iter().map(|g| TOOL_CELL + if g.has_flyout() { FLYOUT_GAP + FLYOUT_W } else { 0.0 }).sum();
     // The end, and the gaps that aren't a group's own: after Actions and after the divider (and
-    // between a board's two buttons, which the end counts as one item).
-    let (end, gaps) = if board { (2.0 * TOOL_CELL, 3.0) } else { (4.0 * TOOL_CELL, 2.0) };
+    // between a board's three buttons, which the end counts as one item).
+    let (end, gaps) = if board { (3.0 * TOOL_CELL, 4.0) } else { (4.0 * TOOL_CELL, 2.0) };
     PAD * 2.0 + tools + (groups.len() as f32 + gaps) * GAP + TOOL_CELL + DIVIDER + end
 }
 
 /// The main toolbar pill: the tool groups with their flyouts, Actions, then the
-/// Draw · Design · Prototype · Inspect mode switcher (on a board, its two buttons).
+/// Draw · Design · Prototype · Inspect mode switcher (on a board, its three buttons).
 fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens, board: bool) {
     let groups = if board { BOARD_GROUPS } else { GROUPS };
     let width = main_width(groups, board);
@@ -172,6 +172,7 @@ fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens, board: 
     if board {
         // Boards have no prototypes or Dev Mode; the Design panel is hidden until asked for.
         x = crate::board_picker::button(app, ui, pos2(x, cy), rect.min.y, t) + GAP;
+        x = crate::shape_libraries::button(app, ui, pos2(x, cy), rect.min.y, t) + GAP;
         let r = Rect::from_center_size(pos2(x + TOOL_CELL / 2.0, cy), vec2(TOOL_CELL, TOOL_CELL));
         let tip = crate::shortcuts::tip(tr("Design panel"), "view.design");
         if tool_cell(ui, t, r, "board_panel", Icon::Panels, app.ui.board_panel, tip).clicked() {
@@ -663,7 +664,7 @@ mod tests {
     }
 
     /// The width the pill asks for is the width its items take — the groups, Actions, the divider
-    /// and the end (the mode switcher, or a board's two buttons), PAD in from either end and one
+    /// and the end (the mode switcher, or a board's three buttons), PAD in from either end and one
     /// GAP apart — so its last item ends exactly PAD from its right edge.
     #[test]
     fn the_pill_is_as_wide_as_its_items() {
@@ -676,7 +677,7 @@ mod tests {
             }
             x += TOOL_CELL + GAP; // Actions
             x += DIVIDER + GAP; // the divider
-            let end = if board { 2.0 * TOOL_CELL + GAP } else { 4.0 * TOOL_CELL };
+            let end = if board { 3.0 * TOOL_CELL + 2.0 * GAP } else { 4.0 * TOOL_CELL };
             assert!((x + end - (pill.max.x - PAD)).abs() < 0.01, "board {board}: {} vs {}", x + end, pill.max.x - PAD);
         }
     }

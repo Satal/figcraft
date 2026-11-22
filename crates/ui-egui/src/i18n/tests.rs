@@ -134,6 +134,8 @@ fn dynamic_labels() -> Vec<&'static str> {
     v.extend(figcraft_doc::BoardShape::ALL.iter().map(|b| b.label()));
     v.extend(figcraft_doc::Stamp::ALL.iter().map(|b| b.label()));
     v.extend(figcraft_engine::board_templates::TEMPLATES.iter().map(|t| t.name));
+    // The built-in shape libraries' names and shapes (the shape libraries popover).
+    v.extend(figcraft_engine::board::built_in_labels());
     v.extend(Group::ALL.iter().map(|g| g.label()));
     v.extend(GESTURES.iter().flat_map(|(_, label, mac, other)| [*label, *mac, *other]));
     v.extend(DATA_LABELS);

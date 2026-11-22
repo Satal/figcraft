@@ -24,6 +24,7 @@ figcraft-vectordrawable = { workspace = true }
 craft-docpath = { workspace = true }
 craft-mermaid = { workspace = true }
 craft-graph-layout = { workspace = true }
+craft-vsdx = { workspace = true }
 figcraft-plugin = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -164,6 +164,8 @@ pub struct Session {
     pub agent: Option<String>,
     /// Where an attached AI agent last worked ([`Session::agent_presence_at`]): display only.
     pub agent_presence: Option<agent::AgentPresence>,
+    /// The VSSX stencils loaded as shape libraries this session (`board.loadShapeLibrary`).
+    pub shape_libraries: Vec<boards::board::ShapeLibrary>,
 }
 
 impl Default for Session {

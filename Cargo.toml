@@ -21,6 +21,8 @@ craft-pdf = { version = "0.1.0", git = "https://github.com/storytold/craft-libs"
 # becomes the craft-libs git rev above after those crates merge.
 craft-mermaid = { path = "../craft-libs-mermaid/crates/mermaid" }
 craft-graph-layout = { path = "../craft-libs/crates/graph-layout" }
+# VSDX drawings and VSSX stencils. A path dep while that crate is in review, like the two above.
+craft-vsdx = { path = "../craft-libs-vsdx/crates/vsdx" }
 # internal
 figcraft-geom = { path = "crates/geom" }
 figcraft-color = { path = "crates/color" }

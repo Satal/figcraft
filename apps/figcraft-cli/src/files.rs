@@ -133,7 +133,10 @@ pub fn write_doc(doc: &Document, page: NodeId, out: &str) -> CliResult<()> {
         "pdf" => page_pdf(doc, page, &PrintSettings::default())?,
         "fig" => fig_bytes(doc)?,
         "penpot" => penpot_bytes(doc)?,
-        other => return Err(CliError::Usage(format!("unknown output format `.{other}` (figcraft, json, svg, png, jpg, webp, pdf, fig, penpot)"))),
+        "vsdx" => vsdx_bytes(doc, page)?,
+        other => {
+            return Err(CliError::Usage(format!("unknown output format `.{other}` (figcraft, json, svg, png, jpg, webp, pdf, fig, penpot, vsdx)")));
+        }
     };
     write(out, &bytes)
 }
@@ -150,6 +153,18 @@ fn fig_bytes(doc: &Document) -> CliResult<Vec<u8>> {
 fn penpot_bytes(doc: &Document) -> CliResult<Vec<u8>> {
     let (bytes, warnings) = figcraft_engine::cmd::file::penpot_bytes(doc).map_err(|e| CliError::Failed(e.to_string()))?;
     for w in warnings {
+        eprintln!("note: {w}");
+    }
+    Ok(bytes)
+}
+
+/// Board page `page` as a VSDX drawing, printing what couldn't be carried across.
+fn vsdx_bytes(doc: &Document, page: NodeId) -> CliResult<Vec<u8>> {
+    if !figcraft_engine::board::is_board(doc) {
+        return Err(CliError::Usage("a VSDX drawing is exported from a board".into()));
+    }
+    let (bytes, ex) = figcraft_engine::board::vsdx_bytes(doc, page).map_err(|e| CliError::Failed(e.to_string()))?;
+    for w in ex.warnings {
         eprintln!("note: {w}");
     }
     Ok(bytes)
@@ -274,10 +289,16 @@ pub fn export(file: &str, out: &str, t: &Target) -> CliResult<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let page = page_named(&doc, t.page.as_deref())?;
+    // A board page as a VSDX drawing.
+    if t.format.as_deref().map_or(ext(out) == "vsdx", |f| f.eq_ignore_ascii_case("vsdx")) {
+        write(out, &vsdx_bytes(&doc, page)?)?;
+        println!("{out}");
+        return Ok(ExitCode::SUCCESS);
+    }
     let (scale, node, print) = (t.scale, t.node.as_deref(), &t.print);
     let fmt = match t.format.as_deref() {
         Some(f) => image_format(&f.to_ascii_lowercase())
-            .ok_or_else(|| CliError::Usage(format!("unknown --format `{f}` (png|jpg|svg|webp|pdf|xml|fig|penpot)")))?,
+            .ok_or_else(|| CliError::Usage(format!("unknown --format `{f}` (png|jpg|svg|webp|pdf|xml|fig|penpot|vsdx)")))?,
         None => image_format(&ext(out)).unwrap_or(ExportFormat::Png),
     };
     let target = node.map(|q| find_node(&doc, page, q)).transpose()?;

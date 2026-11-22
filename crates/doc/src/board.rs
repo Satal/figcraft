@@ -199,6 +199,10 @@ pub enum BoardShape {
     Delay,
     Card,
     Flag,
+    /// An outline of its own (an imported drawing's or a shape library's), kept in the shape's
+    /// outline layer: not in [`BoardShape::ALL`], so the picker and `board.shape` don't offer it.
+    /// [`BoardShape::path`] gives a rectangle for it.
+    Custom,
 }
 
 impl BoardShape {
@@ -266,6 +270,7 @@ impl BoardShape {
             BoardShape::Delay => ("delay", "Delay"),
             BoardShape::Card => ("card", "Card"),
             BoardShape::Flag => ("flag", "Flag"),
+            BoardShape::Custom => ("custom", "Custom shape"),
         }
     }
 
@@ -294,7 +299,7 @@ impl BoardShape {
         };
         let r = w.min(h);
         match self {
-            BoardShape::Rectangle => Rect::new(0.0, 0.0, w, h).to_path(0.1),
+            BoardShape::Rectangle | BoardShape::Custom => Rect::new(0.0, 0.0, w, h).to_path(0.1),
             BoardShape::RoundedRectangle => RoundedRect::new(0.0, 0.0, w, h, r * 0.16).to_path(0.1),
             BoardShape::Ellipse => Ellipse::from_rect(Rect::new(0.0, 0.0, w, h)).to_path(0.1),
             BoardShape::Diamond => poly(&[(0.5, 0.0), (1.0, 0.5), (0.5, 1.0), (0.0, 0.5)]),
@@ -391,7 +396,7 @@ impl BoardShape {
     /// size): inside the outline's widest part.
     pub fn text_insets(self) -> [f64; 4] {
         match self {
-            BoardShape::Rectangle | BoardShape::RoundedRectangle => [0.08, 0.08, 0.08, 0.08],
+            BoardShape::Rectangle | BoardShape::RoundedRectangle | BoardShape::Custom => [0.08, 0.08, 0.08, 0.08],
             BoardShape::Ellipse => [0.16, 0.16, 0.16, 0.16],
             BoardShape::Diamond => [0.25, 0.25, 0.25, 0.25],
             BoardShape::Triangle => [0.45, 0.22, 0.06, 0.22],

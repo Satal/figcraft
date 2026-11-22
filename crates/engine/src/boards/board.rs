@@ -27,9 +27,11 @@ mod derived;
 mod diagram;
 mod edit;
 mod items;
+mod library;
 mod mindmap;
 mod reshape;
 mod tools;
+mod vsdx;
 
 pub use code::is_code_text;
 pub(crate) use connectors::end_handle_at;
@@ -38,6 +40,9 @@ use connectors::{connector_cmd, reattach};
 pub use derived::route;
 pub(crate) use derived::{settle_routes, settle_stamps, settle_text, stamp_target};
 pub use diagram::looks_like_flowchart;
+pub use library::{LibraryShape, ShapeLibrary, built_in, built_in_labels, libraries};
+pub use vsdx::{Exported, drawing, vsdx_bytes};
+pub(crate) use vsdx::{export_cmd as export_vsdx, import_bytes};
 
 /// The topmost sticky or shape at `p` on `page`, other than `except`, sections and frames looked
 /// into: what a "+" handle dragged onto it joins (#1919).
@@ -280,6 +285,48 @@ pub fn specs() -> Vec<CommandSpec> {
             "{text (a Mermaid flowchart: `flowchart` or `graph` then its nodes and links), x?, y? (its top-left on the page; default centred in the view)} → {ids, shapes, connectors, sections, warnings}  shapes, sections for subgraphs and elbow connectors, laid out in ranks and selected; a shape without an outline of its own gets the nearest one, with a warning. Another kind of diagram, or text that can't be read, adds nothing",
             true,
             diagram::import_cmd
+        ),
+        spec!(
+            "board.exportVsdx",
+            "Export VSDX drawing",
+            "{path? (where to write it; without one the bytes come back as base64 `data`)} → {path?, data?, format, bytes?, shapes, connectors, warnings}  the current board page as a VSDX drawing: shapes with their outlines, text and colours, glued connectors with their bends, arrowheads and dashes, sections as titled background rectangles and stickies as filled rectangles. What a drawing has no place for (ink, stamps, tables, images) is listed in `warnings`",
+            false,
+            vsdx::export_cmd
+        ),
+        spec!(
+            "board.importVsdx",
+            "Import VSDX drawing",
+            "{path? | data (base64), name? (with data), page? (its index, from 0; default the first), x?, y? (its top-left on the page; default centred in the view)} → {ids, shapes, connectors, sections, stickies, warnings}  adds a VSDX drawing's page to the board, selected: outlines that match a board shape become it, others keep their own outline; glued connectors attach to their shapes. What can't be carried across is listed in `warnings`; a file that can't be read adds nothing",
+            true,
+            vsdx::import_cmd
+        ),
+        spec!(
+            "board.shapeLibraries",
+            "Shape libraries",
+            "{} → {libraries: [{id, name, path?, builtIn, error?, shapes: [{name, label, width, height, path (SVG path data in its box), hasIcon?}]}]}  the built-in shape libraries and the VSSX stencils loaded",
+            false,
+            library::list_cmd
+        ),
+        spec!(
+            "board.loadShapeLibrary",
+            "Load VSSX stencil",
+            "{path | data (base64), name? (with data)} → {id, name, shapes, warnings}  loads a VSSX stencil as a shape library and remembers it (by its path) in preferences",
+            false,
+            library::load_cmd
+        ),
+        spec!(
+            "board.removeShapeLibrary",
+            "Remove shape library",
+            "{library (a loaded library's id)} → {removed}  forgets a loaded VSSX stencil; built-in libraries stay",
+            false,
+            library::remove_cmd
+        ),
+        spec!(
+            "board.insertLibraryShape",
+            "Insert library shape",
+            "{library, name (a shape's name in it), x?, y? (its centre on the page; default the view's centre)} → {id}  adds a shape from a shape library, selected",
+            true,
+            library::insert_cmd
         ),
         spec!(
             "board.tidyDiagram",

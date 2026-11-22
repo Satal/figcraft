@@ -123,6 +123,10 @@ pub struct Prefs {
     /// for updates by themselves. A file naming another one doesn't contact its server (#1097).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub team_libraries: Vec<String>,
+    /// The VSSX stencils loaded as shape libraries (`board.loadShapeLibrary`), by path, oldest
+    /// first: read again when the shape libraries are next listed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shape_libraries: Vec<String>,
 }
 
 /// Recently run actions kept for the Actions palette (newest first).
@@ -165,6 +169,7 @@ impl Default for Prefs {
             board_grid: Default::default(),
             recent_actions: Vec::new(),
             team_libraries: Vec::new(),
+            shape_libraries: Vec::new(),
         }
     }
 }

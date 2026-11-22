@@ -384,6 +384,7 @@ use widgets::board_picker;
 pub use widgets::colorpicker;
 pub use widgets::field_math;
 pub use widgets::font_preview;
+use widgets::shape_libraries;
 pub use widgets::style_picker;
 
 use std::collections::BTreeSet;

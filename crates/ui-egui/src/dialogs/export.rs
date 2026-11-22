@@ -30,21 +30,33 @@ pub(crate) fn fig_exported(app: &mut FigApp, result: &Value) {
     });
 }
 
-/// Save the whole file as `.fig`; the toast says how much was left out.
-fn save_fig(app: &mut FigApp, name: &str) {
-    let filename = format!("{name}.fig");
+/// A board page exported as a VSDX drawing: the toast says how much couldn't be carried across.
+pub(crate) fn vsdx_exported(app: &mut FigApp, result: &Value) {
+    let file = result_file_name(result);
+    let warnings = result["warnings"].as_array().map_or(0, Vec::len);
+    app.toast(match warnings {
+        0 => trf("Exported {name}", &[("name", &file)]),
+        n => trn("Exported {name}; {n} things couldn't be carried across exactly", n, &[("name", &file)]),
+    });
+}
+
+/// Save the whole file as `.fig`, or a board page as a VSDX drawing (`format`); the toast says
+/// how much was left out.
+pub(crate) fn save_whole(app: &mut FigApp, name: &str, format: &'static str) {
+    let filename = format!("{name}.{format}");
+    let done = move |app: &mut FigApp, r: &Value| if format == "vsdx" { vsdx_exported(app, r) } else { fig_exported(app, r) };
     if app.services.downloads() {
-        if let Some(mut r) = app.run("file.export", json!({"format": "fig"}))
+        if let Some(mut r) = app.run("file.export", json!({"format": format}))
             && app.download(&filename, &r)
         {
             r["name"] = json!(filename);
-            fig_exported(app, &r);
+            done(app, &r);
         }
         return;
     }
-    app.pick_save(tr("Export"), &filename, &["fig"], |app, p| {
-        if let Some(r) = app.run("file.export", json!({"format": "fig", "path": p.to_string_lossy()})) {
-            fig_exported(app, &r);
+    app.pick_save(tr("Export"), &filename, &[format], move |app, p| {
+        if let Some(r) = app.run("file.export", json!({"format": format, "path": p.to_string_lossy()})) {
+            done(app, &r);
         }
     });
 }
@@ -57,6 +69,8 @@ enum ExportChoice {
     Once(ExportSetting),
     /// The whole file as `.fig` (experimental).
     Fig,
+    /// A board's page as a VSDX drawing.
+    Vsdx,
 }
 
 /// The Export dialog: the layers' own export settings when they have some, and one-off presets for
@@ -148,13 +162,23 @@ pub(super) fn export_dialog(app: &mut FigApp, ctx: &Context) {
             choice = Some(ExportChoice::Fig);
         }
         caption(ui, tr("Other apps may not open every .fig file exported here."));
+        if figcraft_engine::board::is_board(&doc) {
+            divider(ui);
+            caption(ui, tr("This board page"));
+            ui.add_space(4.0);
+            if row(ui, tr("VSDX drawing")) {
+                choice = Some(ExportChoice::Vsdx);
+            }
+            caption(ui, tr("Shapes, connectors, sections and stickies; ink, stamps, tables and images are left out."));
+        }
     });
     let close = choice.is_some() || !open;
     match choice {
         Some(ExportChoice::Layers) => export_layers(app, &with_settings, false),
         Some(ExportChoice::Once(s)) if !ids.is_empty() => save_one(app, &ids, &s, &suggested_name(&doc, &ids, &s, "Export")),
         Some(ExportChoice::Once(_)) => app.toast(tr("Nothing to export")),
-        Some(ExportChoice::Fig) => save_fig(app, &doc.name),
+        Some(ExportChoice::Fig) => save_whole(app, &doc.name, "fig"),
+        Some(ExportChoice::Vsdx) => save_whole(app, &doc.name, "vsdx"),
         None => {}
     }
     if close {

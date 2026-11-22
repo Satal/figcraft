@@ -24,8 +24,15 @@ fn board() -> Ui {
     u
 }
 
-/// The templates button: left of the Design panel's button at the board toolbar's right end.
+/// The templates button: left of the shape libraries button and the Design panel's at the board
+/// toolbar's right end.
 fn templates_button(u: &Ui) -> Pos2 {
+    let p = crate::toolbar::pill_rect(u.app.canvas.rect, crate::toolbar::bar_width(&u.app));
+    pos2(p.max.x - 8.0 - 2.0 * (32.0 + 8.0) - 16.0, p.center().y)
+}
+
+/// The shape libraries button: left of the Design panel's button.
+fn libraries_button(u: &Ui) -> Pos2 {
     let p = crate::toolbar::pill_rect(u.app.canvas.rect, crate::toolbar::bar_width(&u.app));
     pos2(p.max.x - 8.0 - 32.0 - 8.0 - 16.0, p.center().y)
 }
@@ -59,6 +66,27 @@ fn the_templates_picker_places_a_template_or_a_table() {
     click(&mut u, at);
     u.frame(vec![Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
     assert_eq!(u.app.ui.tool_flyout, None);
+}
+
+#[test]
+fn the_shape_libraries_popover_lists_the_libraries_and_adds_a_shape() {
+    let mut u = board();
+    let at = libraries_button(&u);
+    click(&mut u, at);
+    assert_eq!(u.app.ui.tool_flyout, Some("shape_libraries"));
+    let shapes = flat(&u.frame_output(vec![]).shapes);
+    // The first libraries show; the rest are further down its scrolling list.
+    for name in ["Shape libraries", "Flowchart", "Network"] {
+        assert!(has_text(&shapes, name), "{name} in the popover");
+    }
+    let before = count(&u, |b| matches!(b, BoardItem::Shape { .. }));
+    // The flowchart's first shape: the cell under its title.
+    let area = u.ctx.memory(|m| m.area_rect(egui::Id::unique("shape_libraries_area"))).expect("the popover shows");
+    let title = text_center(&shapes, "Flowchart");
+    click(&mut u, pos2(area.min.x + 10.0 + 22.0, title.y + 36.0));
+    assert_eq!(count(&u, |b| matches!(b, BoardItem::Shape { .. })), before + 1, "a click adds the shape");
+    assert_eq!(u.app.ui.tool_flyout, None, "and closes the popover");
+    assert!(!u.app.session.selection().is_empty(), "the new shape is selected");
 }
 
 #[test]

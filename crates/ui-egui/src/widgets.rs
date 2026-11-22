@@ -12,6 +12,7 @@ pub(crate) mod board_picker;
 pub mod colorpicker;
 pub mod field_math;
 pub mod font_preview;
+pub(crate) mod shape_libraries;
 pub mod style_picker;
 
 pub const ROW_H: f32 = 32.0;
