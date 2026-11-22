@@ -592,6 +592,16 @@ one undo step and returns the ids it made:
   one leaves and arrives along the sides. The connector re-routes itself whenever what it joins
   moves or resizes, also when someone else in a live session moves it; a deleted end stays where it
   was as a point. `board.label {id, text}` sets its label (empty removes it).
+- `board.importMermaid {text, x?, y?}` → `{ids, shapes, connectors, sections, warnings}`: a Mermaid
+  flowchart (`flowchart`/`graph`) as board shapes sized to their labels, a section per subgraph and
+  elbow connectors, laid out in ranks in the chart's direction without overlaps, its top-left at
+  `x, y` (default centred in the view), selected, in one undo step. Another kind of diagram, or text
+  that does not parse, is refused and adds nothing; `warnings` lists what is drawn differently or
+  left out (a shape with no outline of its own, Markdown labels, cross arrowheads).
+- `board.tidyDiagram {ids?, direction?: down|up|right|left}` → `{ids, connectors}`: lays the given
+  (or selected; with fewer than two selected, all on the page) shapes and stickies out in ranks along
+  the connectors between them, keeping their top-left, and re-routes those connectors. Refused with
+  fewer than two.
 - `board.reattach {id?, end: from|to, target, side?, at?}` → `{id}`: moves one end of a connector
   (default the selected one; its label stands for it) onto `target`, a layer id or an `{x, y}`
   page point where the end stays free. Refused when both ends would be on one layer or the target

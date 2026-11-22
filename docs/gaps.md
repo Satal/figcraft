@@ -603,6 +603,11 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
 - **Landed (2026-10-24, M12):** a dot grid on board pages, under the layers; a selected
   connector's ends drag onto another object or empty canvas (`board.reattach`); curved connectors;
   elbows that go around the objects they join.
+- **Landed (2026-11-21, M12):** Mermaid flowcharts import as shapes, sections and connectors laid
+  out without overlaps (`board.importMermaid`, a File menu dialog, or paste on a board);
+  `board.tidyDiagram` lays out shapes and stickies along their connectors; elbows go around other
+  objects in their way; six more shapes. Other Mermaid diagram kinds, a subgraph's own direction
+  and Markdown labels are not done yet.
 - **Missing:** timer music, board widgets, saving your own templates, table column resizing and
   cell colours, the mind maps' toolbar entry, shortcuts, drag to re-parent and import, washi tape, the code blocks' toolbar entry, language menu, highlighting and import, audio and huddles, quick-create handles,
   the stamp wheel, emotes and stickers, `.jam` files
