@@ -119,6 +119,20 @@ pub(super) fn menu_input_dialog(app: &mut FigApp, ctx: &Context) {
 /// Import Mermaid flowchart `text` onto the board, centred in the view or with its top-left at
 /// `at`, and say what was drawn differently or left out. Whether it was imported.
 pub(crate) fn import_mermaid(app: &mut FigApp, text: &str, at: Option<(f64, f64)>) -> bool {
+    // The engine refuses an oversized chart in its own words; the user is told through the
+    // translation system.
+    if let Some((nodes, links)) = figcraft_engine::board::import_overflow(text) {
+        app.show_error(i18n::trf(
+            "The flowchart has {nodes} nodes and {links} links; at most {max_nodes} nodes and {max_links} links can be imported at once: nothing was added",
+            &[
+                ("nodes", &nodes),
+                ("links", &links),
+                ("max_nodes", &figcraft_engine::board::MAX_NODES),
+                ("max_links", &figcraft_engine::board::MAX_EDGES),
+            ],
+        ));
+        return false;
+    }
     let mut params = json!({"text": text});
     if let Some((x, y)) = at {
         (params["x"], params["y"]) = (json!(x), json!(y));

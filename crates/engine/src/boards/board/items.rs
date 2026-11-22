@@ -252,7 +252,7 @@ pub(super) fn add_connected(s: &mut Session, p: &Value) -> Result<Value> {
         path: None,
         branch: false,
     };
-    let line = make(doc, page, connector, CAPS)?;
+    let line = make(doc, page, connector, CAPS, true)?;
     s.set_selection(vec![id]);
     if boolean(p, "edit") == Some(true) {
         s.request_ui("board.editText", json!({"id": id}));

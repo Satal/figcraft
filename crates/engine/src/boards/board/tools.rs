@@ -176,7 +176,7 @@ impl Session {
             // One that can't be placed shows nothing, as none would be made.
             let _ = self.preview(|d, _| {
                 if let Some(c) = &c {
-                    let _ = make(d, page, c.clone(), CAPS);
+                    let _ = make(d, page, c.clone(), CAPS, true);
                 }
                 Ok(())
             });

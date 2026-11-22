@@ -82,7 +82,7 @@ fn branch(doc: &mut Document, page: NodeId, parent: NodeId, child: NodeId, left:
         path: None,
         branch: true,
     };
-    let line = make(doc, page, c, (StrokeCap::Round, StrokeCap::Round))?;
+    let line = make(doc, page, c, (StrokeCap::Round, StrokeCap::Round), true)?;
     let n = doc.get_mut(line)?;
     n.strokes = vec![Paint::solid(BRANCH)];
     n.stroke.weight = BRANCH_WEIGHT;

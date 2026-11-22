@@ -102,3 +102,16 @@ fn tab_leaves_the_flowchart_field() {
     assert!(!u.ctx.memory(|m| m.has_focus(field)), "Tab moves on, no trap");
     assert!(matches!(&u.app.ui.menu_input, Some(MenuInput::Mermaid(t)) if !t.contains('\t')), "{:?}", u.app.ui.menu_input);
 }
+
+#[test]
+fn a_plain_line_starting_with_graph_pastes_as_text_not_shapes() {
+    let mut app = FigApp::new(session(true), Box::new(NoServices));
+    let texts = |d: &Document| d.ids().filter(|i| d.node(*i).is_some_and(|n| matches!(n.kind, NodeKind::Text(_)))).count();
+    let before = texts(app.session.doc().unwrap());
+    for line in ["graph paper for the workshop", "flowchart ideas for Monday"] {
+        menus::paste(&mut app, Some(line), None);
+    }
+    let doc = app.session.doc().unwrap();
+    assert_eq!(shapes(doc), 0, "no shapes");
+    assert!(texts(doc) > before, "the text was pasted");
+}

@@ -39,7 +39,7 @@ pub use connectors::{END_HANDLE_PX, selected_connector_ends};
 use connectors::{connector_cmd, reattach};
 pub use derived::route;
 pub(crate) use derived::{settle_routes, settle_stamps, settle_text, stamp_target};
-pub use diagram::looks_like_flowchart;
+pub use diagram::{MAX_EDGES, MAX_NODES, import_overflow, looks_like_flowchart};
 pub use library::{LibraryShape, ShapeLibrary, built_in, built_in_labels, libraries};
 pub use vsdx::{Exported, drawing, vsdx_bytes};
 pub(crate) use vsdx::{export_cmd as export_vsdx, import_bytes};

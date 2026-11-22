@@ -1,5 +1,5 @@
-use super::derived::{ends_now, place_route, route};
-use super::edit::set_label;
+use super::derived::{ends_now, place_route, route, route_among};
+use super::edit::{label_of, set_label};
 use super::items::add;
 use super::{
     BoardItem, Connector, Document, End, LINE, LINE_WEIGHT, NodeId, NodeKind, Paint, Point, Result, Session, Side, StrokeCap, StrokeJoin, Value,
@@ -50,6 +50,22 @@ fn end_param(cmd: &str, s: &Session, p: &Value, [key, side_key, at_key]: [&str; 
 }
 
 pub(super) fn connector_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let out = create(s, p, true)?;
+    if let Some(id) = out.get("id").and_then(id_of) {
+        s.set_selection(vec![id]);
+    }
+    Ok(out)
+}
+
+/// A connector made as `board.connector` does, but placed straight between its ends: for a caller
+/// (a Mermaid import) whose edit settles every connector's route afterwards. Its id.
+pub(super) fn create_unrouted(s: &mut Session, p: &Value) -> Result<NodeId> {
+    create(s, p, false)?.get("id").and_then(id_of).ok_or_else(|| bad("board.connector", "no connector was made"))
+}
+
+/// The connector `p` describes, its elbow routed around the page's objects when `around`. A
+/// failed label takes the connector with it.
+fn create(s: &mut Session, p: &Value, around: bool) -> Result<Value> {
     let cmd = "board.connector";
     require(s, cmd)?;
     let from = end_param(cmd, s, p, ["from", "fromSide", "fromAt"])?;
@@ -65,12 +81,21 @@ pub(super) fn connector_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let end = cap_of(cmd, p, "endCap")?.unwrap_or(CAPS.1);
     let page = s.page()?;
     let doc = s.doc_mut()?;
-    let id = make(doc, page, Connector { from, to, routing, path: None, branch: false }, (start, end))?;
+    let id = make(doc, page, Connector { from, to, routing, path: None, branch: false }, (start, end), around)?;
     let mut out = json!({"id": id});
     if let Some(text) = string(p, "label").filter(|t| !t.trim().is_empty()) {
-        out["label"] = json!(set_label(doc, id, &text)?);
+        match set_label(doc, id, &text) {
+            Ok(label) => out["label"] = json!(label),
+            Err(e) => {
+                // No half-made connector is left on the board.
+                if let Some(l) = label_of(doc, id) {
+                    let _ = doc.remove(l);
+                }
+                let _ = doc.remove(id);
+                return Err(e);
+            }
+        }
     }
-    s.set_selection(vec![id]);
     Ok(out)
 }
 
@@ -78,10 +103,11 @@ pub(super) fn connector_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) const CAPS: (StrokeCap, StrokeCap) = (StrokeCap::None, StrokeCap::TriangleArrow);
 
 /// Connector `c` added to `page` with its line, `caps` (start, end) and route: what
-/// `board.connector` makes, and the connector tool shows while it is dragged.
-pub(super) fn make(doc: &mut Document, page: NodeId, c: Connector, caps: (StrokeCap, StrokeCap)) -> Result<NodeId> {
+/// `board.connector` makes, and the connector tool shows while it is dragged. Its elbow goes around
+/// the page's objects when `around`.
+pub(super) fn make(doc: &mut Document, page: NodeId, c: Connector, caps: (StrokeCap, StrokeCap), around: bool) -> Result<NodeId> {
     let cmd = "board.connector";
-    let pts = route(doc, &c).ok_or_else(|| bad(cmd, "the ends can't be placed"))?;
+    let pts = (if around { route(doc, &c) } else { route_among(doc, &c, &[]) }).ok_or_else(|| bad(cmd, "the ends can't be placed"))?;
     if pts.windows(2).all(|w| w.first() == w.get(1)) {
         return Err(bad(cmd, "the ends are in the same place"));
     }
