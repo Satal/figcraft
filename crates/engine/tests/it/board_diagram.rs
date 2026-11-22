@@ -225,3 +225,95 @@ fn tidy_needs_two_shapes() {
     assert!(s.execute("board.tidyDiagram", &json!({})).is_err());
     assert!(s.execute("board.tidyDiagram", &json!({"direction": "sideways"})).is_err());
 }
+
+#[test]
+fn tidy_moves_sections_as_blocks_and_keeps_every_connector() {
+    let mut s = board();
+    s.execute("board.importMermaid", &json!({"text": CHART, "x": 0, "y": 0})).unwrap();
+    let doc = s.doc().unwrap();
+    let page = s.page().unwrap();
+    let sec = doc.node(page).unwrap().children.iter().copied().find(|c| doc.node(*c).unwrap().name == "Shipping").unwrap();
+    // Pile the top level on top of each other, then tidy with nothing selected.
+    let top: Vec<NodeId> = doc.node(page).unwrap().children.iter().copied().filter(|c| *c == sec || shapes(&s).contains(c)).collect();
+    for (i, id) in top.iter().enumerate() {
+        s.doc_mut().unwrap().get_mut(*id).unwrap().transform = figcraft_geom::Affine::translate((10.0 * i as f64, 10.0 * i as f64));
+    }
+    s.set_selection(vec![]);
+    let inside: Vec<(NodeId, Rect)> = ["Build it", "Test", "Done"].iter().map(|t| shape_named(&s, t)).map(|id| (id, bounds(&s, id))).collect();
+    let before = connectors(&s);
+    let out = s.execute("board.tidyDiagram", &json!({})).unwrap();
+    no_overlaps(&s, &top);
+    let area = bounds(&s, sec);
+    for (id, was) in inside {
+        let b = bounds(&s, id);
+        assert!(b.x0 >= area.x0 && b.y0 >= area.y0 && b.x1 <= area.x1 && b.y1 <= area.y1, "{b:?} inside {area:?}");
+        assert!((b.width() - was.width()).abs() < 0.5, "size kept");
+    }
+    assert_eq!(connectors(&s).len(), before.len(), "{out}");
+    assert!(out["warnings"].as_array().unwrap().is_empty(), "{out}");
+    for (_, from, to) in connectors(&s) {
+        assert!(s.doc().unwrap().contains(from) && s.doc().unwrap().contains(to));
+    }
+}
+
+#[test]
+fn tidy_refuses_layers_with_different_parents() {
+    let mut s = board();
+    s.execute("board.importMermaid", &json!({"text": CHART, "x": 0, "y": 0})).unwrap();
+    let doc = s.doc().unwrap();
+    let sec = doc.node(s.page().unwrap()).unwrap().children.iter().copied().find(|c| doc.node(*c).unwrap().name == "Shipping").unwrap();
+    let (inner, outer) = (shape_named(&s, "Test"), shape_named(&s, "Start"));
+    assert!(doc.node(inner).unwrap().parent == Some(sec));
+    let e = s.execute("board.tidyDiagram", &json!({"ids": [inner, outer]}));
+    assert!(e.is_err(), "{e:?}");
+}
+
+#[test]
+fn an_oversized_flowchart_is_refused_and_adds_nothing() {
+    let mut s = board();
+    let big = (0..600).map(|i| format!("n{i} --> n{}", i + 1)).collect::<Vec<_>>().join("\n");
+    let e = s.execute("board.importMermaid", &json!({"text": format!("flowchart TD\n{big}")}));
+    assert!(e.is_err(), "{e:?}");
+    assert!(items(&s).is_empty());
+}
+
+#[test]
+fn only_a_flowchart_header_reads_as_a_flowchart() {
+    use figcraft_engine::board::looks_like_flowchart as looks;
+    for yes in ["graph TD\n a-->b", "flowchart\n a-->b", "%% note\n\nflowchart LR;\n a-->b", "---\ntitle: t\n---\ngraph RL"] {
+        assert!(looks(yes), "{yes:?}");
+    }
+    for no in ["graph paper for the workshop", "flowchart ideas", "graph TD a-->b", "graph TD extra", "", "pie"] {
+        assert!(!looks(no), "{no:?}");
+    }
+}
+
+#[test]
+fn a_mind_map_is_left_alone_by_tidy_and_by_moving_an_unrelated_shape() {
+    let mut s = board();
+    s.execute("board.mindMap", &json!({"x": 100, "y": 200})).unwrap();
+    let map_parts = |s: &Session| -> Vec<(NodeId, Rect)> {
+        let mut v: Vec<_> = items(s)
+            .into_iter()
+            .filter(|(_, b)| matches!(b, BoardItem::MindNode) || matches!(b, BoardItem::Connector(c) if c.branch))
+            .map(|(id, _)| (id, bounds(s, id)))
+            .collect();
+        v.sort_by_key(|(id, _)| id.0);
+        v
+    };
+    let before = map_parts(&s);
+    assert!(before.len() > 2);
+    let shape = |s: &mut Session, x: f64| {
+        let v = s.execute("board.shape", &json!({"shape": "rectangle", "x": x, "y": 900, "width": 120, "height": 80})).unwrap();
+        NodeId(v["id"].as_u64().unwrap())
+    };
+    let [a, b] = [shape(&mut s, 0.0), shape(&mut s, 30.0)];
+    s.execute("board.connector", &json!({"from": a, "to": b, "style": "elbow"})).unwrap();
+    s.set_selection(vec![]);
+    let out = s.execute("board.tidyDiagram", &json!({})).unwrap();
+    assert!(!out["warnings"].as_array().unwrap().is_empty(), "the mind map is listed as left in place: {out}");
+    assert_eq!(map_parts(&s), before, "tidy");
+    s.doc_mut().unwrap().get_mut(a).unwrap().transform = figcraft_geom::Affine::translate((400.0, 1200.0));
+    s.execute("board.tidyDiagram", &json!({"ids": [a, b]})).unwrap();
+    assert_eq!(map_parts(&s), before, "moving an unrelated shape");
+}

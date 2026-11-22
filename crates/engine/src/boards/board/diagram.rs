@@ -11,6 +11,7 @@ use figcraft_doc::{BoardItem, BoardShape, Document, End, NodeId, NodeKind, Side,
 use figcraft_geom::{Affine, Vec2};
 use serde_json::{Value, json};
 
+use super::connectors;
 use super::derived::{place_route, route};
 use super::{Result, Session, bad, id_of, num, require, string};
 use crate::EngineError;
@@ -34,12 +35,16 @@ const RANK_SEP: f64 = 64.0;
 /// What an imported shape and section are filled with when the text sets no colour.
 const SHAPE_FILL: &str = "#FFFFFF";
 const SECTION_FILL: &str = "#F0EFFA";
+/// The most nodes and links one import takes: past this, laying out and routing would stall the app.
+const MAX_NODES: usize = 500;
+const MAX_EDGES: usize = 2_000;
 /// A thick (`==>`) line's weight and a dotted (`-.->`) line's dashes.
 const THICK: f64 = 4.0;
 const DOTTED: [f64; 2] = [4.0, 4.0];
 
 /// Whether `text` reads as a Mermaid flowchart: after any front matter, blank lines and `%%`
-/// comments, its first word is `flowchart` or `graph`. What pasting on a board imports.
+/// comments, its first line is `flowchart` or `graph`, optionally with a direction (`TB`, `TD`,
+/// `BT`, `LR` or `RL`) and a `;`, and nothing else. What pasting on a board imports.
 pub fn looks_like_flowchart(text: &str) -> bool {
     let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("%%")).peekable();
     if lines.peek() == Some(&"---") {
@@ -50,7 +55,11 @@ pub fn looks_like_flowchart(text: &str) -> bool {
             }
         }
     }
-    lines.next().and_then(|l| l.split_whitespace().next()).is_some_and(|w| matches!(w, "flowchart" | "graph"))
+    let Some(first) = lines.next() else { return false };
+    let mut words = first.strip_suffix(';').unwrap_or(first).split_whitespace();
+    matches!(words.next(), Some("flowchart" | "graph"))
+        && words.next().is_none_or(|d| matches!(d, "TB" | "TD" | "BT" | "LR" | "RL"))
+        && words.next().is_none()
 }
 
 pub(super) fn import_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -69,6 +78,16 @@ pub(super) fn import_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     };
     if chart.nodes.is_empty() {
         return Err(bad(cmd, "the flowchart has no nodes: nothing was added"));
+    }
+    if chart.nodes.len() > MAX_NODES || chart.edges.len() > MAX_EDGES {
+        return Err(bad(
+            cmd,
+            format!(
+                "the flowchart has {} nodes and {} links, more than the {MAX_NODES} nodes and {MAX_EDGES} links that can be imported at once: nothing was added",
+                chart.nodes.len(),
+                chart.edges.len()
+            ),
+        ));
     }
     let mut warnings: Vec<String> = chart.warnings.iter().map(|w| format!("line {}: {}", w.line, w.message)).collect();
     let plan = plan(&chart, &mut warnings);
@@ -148,7 +167,7 @@ pub(super) fn import_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(label) = edge.label.as_deref().filter(|l| !l.trim().is_empty()) {
             cp["label"] = json!(label);
         }
-        let id = match b.run("board.connector", cp) {
+        let id = match connectors::create_unrouted(b.s, &cp) {
             Ok(id) => id,
             Err(e) => {
                 warnings.push(format!("{}: not drawn ({e})", name()));
@@ -182,13 +201,39 @@ pub(super) fn tidy_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let named = p.get("ids").is_some_and(|v| !v.is_null()) || p.get("id").is_some_and(|v| !v.is_null());
     let given = targets(s, p);
     let doc = s.doc()?;
-    let mut items: Vec<NodeId> = given.into_iter().filter(|c| tidies(doc, *c)).collect();
-    // A selection without two shapes in it (a connector, nothing) tidies the whole page.
+    let mut warnings: Vec<String> = Vec::new();
+    let mut items: Vec<NodeId> = given.iter().copied().filter(|c| tidies(doc, *c)).collect();
+    let mut holder = page;
+    // A selection without two nodes in it (a connector, nothing) tidies the whole page.
     if items.len() < 2 && !named {
         items = doc.node(page).map(|n| n.children.iter().copied().filter(|c| tidies(doc, *c)).collect()).unwrap_or_default();
+        let rest = doc.node(page).map_or(0, |n| n.children.iter().filter(|c| !tidies(doc, **c) && !is_line(doc, **c)).count());
+        if rest > 0 {
+            warnings.push(format!("{rest} layers (ink, tables, images, locked or hidden ones) stay where they are"));
+        }
+    } else {
+        let parents: Vec<Option<NodeId>> = items.iter().map(|i| doc.node(*i).and_then(|n| n.parent)).collect();
+        if parents.windows(2).any(|w| w.first() != w.get(1)) {
+            return Err(bad(
+                cmd,
+                "the selected layers are in different places (a section and what is inside it, say): select layers that share one parent",
+            ));
+        }
+        holder = parents.first().copied().flatten().unwrap_or(page);
+        let skipped = given.iter().filter(|c| !tidies(doc, **c) && !is_line(doc, **c)).count();
+        if skipped > 0 {
+            warnings.push(format!("{skipped} selected layers (ink, tables, images, locked or hidden ones) stay where they are"));
+        }
     }
     if items.len() < 2 {
-        return Err(bad(cmd, "two or more shapes or stickies are needed to tidy"));
+        return Err(bad(cmd, "two or more shapes, stickies or sections are needed to tidy"));
+    }
+    // What moves is laid out on the page and moved in its parent's space: that must be a plain
+    // scale and shift.
+    let to_page = doc.world_transform(holder);
+    let [sx, kx, ky, sy, _, _] = to_page.as_coeffs();
+    if kx.abs() > 1e-9 || ky.abs() > 1e-9 || sx <= 1e-9 || sy <= 1e-9 {
+        return Err(bad(cmd, "what is inside a rotated or flipped layer can't be tidied: nothing was moved"));
     }
     let index: BTreeMap<NodeId, usize> = items.iter().enumerate().map(|(i, n)| (*n, i)).collect();
     let rects: Vec<figcraft_geom::Rect> = items.iter().map(|n| doc.world_bounds(*n).ok_or(EngineError::NoNode(*n))).collect::<Result<_>>()?;
@@ -196,14 +241,20 @@ pub(super) fn tidy_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         nodes: rects.iter().map(|r| gl::NodeSpec { size: gl::Size::new(r.width(), r.height()), group: None }).collect(),
         ..Default::default()
     };
+    // The item an end belongs to: the layer itself or the section around it.
+    let item_of = |n: NodeId| std::iter::once(n).chain(doc.ancestors(n)).find_map(|a| index.get(&a).map(|i| (*i, a == n)));
     // The connectors between them, in the order they are on the page.
-    let mut lines: Vec<(NodeId, usize)> = Vec::new();
-    for c in doc.node(page).map(|n| n.children.clone()).unwrap_or_default() {
+    let mut lines: Vec<(NodeId, usize, bool, bool)> = Vec::new();
+    for c in doc.subtree(page) {
         let Some(BoardItem::Connector(k)) = doc.node(c).and_then(|n| n.board.as_ref()) else { continue };
-        let (Some(f), Some(t)) = (k.from.node().and_then(|n| index.get(&n)), k.to.node().and_then(|n| index.get(&n))) else { continue };
+        // A mind map's branches follow their own layout.
+        if k.branch {
+            continue;
+        }
+        let (Some((f, direct_f)), Some((t, direct_t))) = (k.from.node().and_then(item_of), k.to.node().and_then(item_of)) else { continue };
         if f != t {
-            lines.push((c, graph.edges.len()));
-            graph.edges.push(gl::EdgeSpec::new(*f, *t));
+            lines.push((c, graph.edges.len(), direct_f, direct_t));
+            graph.edges.push(gl::EdgeSpec::new(f, t));
         }
     }
     let layout = gl::layered(&graph, &gl::LayeredOptions { direction: dir, node_sep: NODE_SEP, rank_sep: RANK_SEP, ..Default::default() })
@@ -212,16 +263,17 @@ pub(super) fn tidy_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.doc_mut()?;
     for (i, id) in items.iter().enumerate() {
         let (Some(r), Some(old)) = (layout.nodes.get(i), rects.get(i)) else { continue };
-        let delta = Vec2::new(anchor.0 + r.x - old.x0, anchor.1 + r.y - old.y0);
+        let delta = Vec2::new((anchor.0 + r.x - old.x0) / sx, (anchor.1 + r.y - old.y0) / sy);
         let n = doc.get_mut(*id)?;
         n.transform = Affine::translate(delta) * n.transform;
     }
-    // Each connector leaves and arrives on the sides that suit the new layout.
-    for (id, k) in &lines {
+    // Each connector leaves and arrives on the sides that suit the new layout (a layer inside a
+    // section keeps its side choice automatic: the section is what moved).
+    for (id, k, direct_f, direct_t) in &lines {
         let Some(BoardItem::Connector(mut c)) = doc.node(*id).and_then(|n| n.board.clone()) else { continue };
         let (fs, ts) = sides(&layout, &graph, *k);
-        set_side(&mut c.from, fs);
-        set_side(&mut c.to, ts);
+        set_side(&mut c.from, if *direct_f { fs } else { "auto" });
+        set_side(&mut c.to, if *direct_t { ts } else { "auto" });
         c.path = None;
         let routing = c.routing;
         let pts = route(doc, &c);
@@ -231,12 +283,21 @@ pub(super) fn tidy_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.set_selection(items.clone());
-    Ok(json!({"ids": items, "connectors": lines.len()}))
+    Ok(json!({"ids": items, "connectors": lines.len(), "warnings": warnings}))
 }
 
-/// What `board.tidyDiagram` moves: shapes and stickies.
+/// What `board.tidyDiagram` moves: shapes, stickies and sections.
 fn tidies(doc: &Document, id: NodeId) -> bool {
-    doc.node(id).is_some_and(|n| n.visible && !n.locked && matches!(n.board, Some(BoardItem::Shape { .. } | BoardItem::Sticky { .. })))
+    doc.node(id).is_some_and(|n| {
+        n.visible
+            && !n.locked
+            && (matches!(n.board, Some(BoardItem::Shape { .. } | BoardItem::Sticky { .. })) || matches!(n.kind, NodeKind::Section { .. }))
+    })
+}
+
+/// A connector or its label: not something tidy leaves behind, it follows what it joins.
+fn is_line(doc: &Document, id: NodeId) -> bool {
+    doc.node(id).is_some_and(|n| matches!(n.board, Some(BoardItem::Connector(_) | BoardItem::Label { .. })))
 }
 
 fn set_side(end: &mut End, side: &str) {
