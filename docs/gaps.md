@@ -608,6 +608,11 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
   `board.tidyDiagram` lays out shapes and stickies along their connectors; elbows go around other
   objects in their way; six more shapes. Other Mermaid diagram kinds, a subgraph's own direction
   and Markdown labels are not done yet.
+- **Landed (2026-11-22, M12):** VSDX drawings export and import (`board.exportVsdx`,
+  `board.importVsdx`, File ▸ Open, Import and Export, the CLI), glued connectors attached and what
+  is left out listed; shape libraries: four built in and VSSX stencils loaded, in a toolbar
+  popover (`board.loadShapeLibrary`, `board.insertLibraryShape`). Not done yet: layers, themes,
+  gradients and rich text in drawings, search across libraries, dragging a shape out of the popover.
 - **Missing:** timer music, board widgets, saving your own templates, table column resizing and
   cell colours, the mind maps' toolbar entry, shortcuts, drag to re-parent and import, washi tape, the code blocks' toolbar entry, language menu, highlighting and import, audio and huddles, quick-create handles,
   the stamp wheel, emotes and stickers, `.jam` files

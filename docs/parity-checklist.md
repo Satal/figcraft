@@ -2,7 +2,7 @@
 
 > **Generated:** 2026-11-22 by `cargo xtask parity`. Do not edit by hand.
 
-FigCraft commands registered for the incumbent's main menu and toolbar (654 commands in the engine).
+FigCraft commands registered for the incumbent's main menu and toolbar (660 commands in the engine).
 
 **215 / 215 menu items (100.0%)**
 

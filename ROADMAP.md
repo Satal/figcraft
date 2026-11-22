@@ -134,6 +134,8 @@ Ranked; detail and milestones in [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Progress log
 
+- **2026-11-22** · Boards (M12): VSDX drawings export and import. `board.exportVsdx` (File ▸ Export…, `figcraft-cli export --format vsdx`) writes a board page with its shapes, text, sections, stickies and glued connectors; a `.vsdx` opens as a new board or imports into the current one in one undo step (`board.importVsdx`), outlines that match a board shape become it and the rest stay custom shapes; what is left out is listed in `warnings` and a toast. Numbers unchanged.
+- **2026-11-22** · Boards (M12): shape libraries. A toolbar popover lists built-in flowchart, network, UML and arrows libraries and VSSX stencils loaded from files (`board.loadShapeLibrary`, kept in preferences); a click adds the shape at the view's centre (`board.insertLibraryShape`). Numbers unchanged.
 - **2026-11-21** · Boards (M12): Mermaid flowcharts import onto a board as shapes, sections and elbow connectors laid out without overlaps, in one undo step, with warnings for what is drawn differently (`board.importMermaid`, File ▸ Import Mermaid flowchart…, or pasted on a board). Numbers unchanged.
 - **2026-11-21** · Boards (M12): `board.tidyDiagram` (Arrange ▸ Tidy diagram) lays a board's shapes and stickies out in ranks along their connectors. Numbers unchanged.
 - **2026-11-21** · Boards (M12): elbow connectors route around other objects in their way, not only the two they join, and straighten again when the way clears. Numbers unchanged.

@@ -602,6 +602,21 @@ one undo step and returns the ids it made:
   (or selected; with fewer than two selected, all on the page) shapes and stickies out in ranks along
   the connectors between them, keeping their top-left, and re-routes those connectors. Refused with
   fewer than two.
+- `board.exportVsdx {path?}` → `{path?, data?, format, bytes?, shapes, connectors, warnings}`: the
+  current board page as a VSDX drawing, written to `path` or returned as base64 `data`. Shapes keep
+  their outlines, text and colours; connectors stay glued to their shapes; ink, stamps, tables and
+  images are left out and listed in `warnings`. `file.export {format: "vsdx"}` does the same.
+- `board.importVsdx {path? | data (base64), name?, page?, x?, y?}` → `{ids, shapes, connectors,
+  sections, stickies, warnings}`: one page of a drawing (default the first) added to the board,
+  selected, in one undo step. Outlines that match a board shape become it, others keep their own
+  outline; glued connectors attach. A file that can't be read is refused and adds nothing.
+  `file.open` on a `.vsdx` makes a new board of it; `file.import` adds it to the current board.
+- `board.shapeLibraries {}` → `{libraries}`: the built-in shape libraries and the loaded VSSX
+  stencils, each shape with its name, label, size and outline (SVG path data).
+  `board.loadShapeLibrary {path | data, name?}` → `{id, name, shapes, warnings}` loads a stencil
+  and remembers its path in preferences; `board.removeShapeLibrary {library}` forgets one.
+- `board.insertLibraryShape {library, name, x?, y?}` → `{id}`: adds a library shape centred at
+  `x, y` (default the view's centre), selected, in one undo step.
 - `board.reattach {id?, end: from|to, target, side?, at?}` → `{id}`: moves one end of a connector
   (default the selected one; its label stands for it) onto `target`, a layer id or an `{x, y}`
   page point where the end stays free. Refused when both ends would be on one layer or the target
