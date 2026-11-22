@@ -87,6 +87,11 @@ fn the_shape_libraries_popover_lists_the_libraries_and_adds_a_shape() {
     assert_eq!(count(&u, |b| matches!(b, BoardItem::Shape { .. })), before + 1, "a click adds the shape");
     assert_eq!(u.app.ui.tool_flyout, None, "and closes the popover");
     assert!(!u.app.session.selection().is_empty(), "the new shape is selected");
+    assert!(u.app.ui.toast.as_ref().is_some_and(|(m, _)| m.starts_with("Added ")), "the insertion is announced");
+    // The keyboard goes back to the button that opened the popover.
+    u.frame(vec![]);
+    u.frame(vec![]);
+    assert!(u.ctx.memory(|m| m.focused()).is_some(), "the button has the keyboard again");
 }
 
 #[test]

@@ -564,6 +564,8 @@ pub struct UiState {
     pub dark: bool,
     pub follow_system: bool,
     pub tool_flyout: Option<&'static str>,
+    /// The shape libraries popover just closed: its button takes the keyboard back.
+    pub shape_libraries_refocus: bool,
     /// On a board: the Design panel is shown (boards hide it until asked for).
     pub board_panel: bool,
     pub last_error: Option<String>,
@@ -742,6 +744,7 @@ impl Default for UiState {
             dark: false,
             follow_system: false,
             tool_flyout: None,
+            shape_libraries_refocus: false,
             board_panel: false,
             last_error: None,
             pending_opens: Vec::new(),
