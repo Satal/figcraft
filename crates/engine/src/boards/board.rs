@@ -24,6 +24,7 @@ use crate::{EngineError, Result, Session, bad, spec, textedit};
 mod code;
 mod connectors;
 mod derived;
+mod diagram;
 mod edit;
 mod items;
 mod mindmap;
@@ -36,6 +37,7 @@ pub use connectors::{END_HANDLE_PX, selected_connector_ends};
 use connectors::{connector_cmd, reattach};
 pub use derived::route;
 pub(crate) use derived::{settle_routes, settle_stamps, settle_text, stamp_target};
+pub use diagram::looks_like_flowchart;
 
 /// The topmost sticky or shape at `p` on `page`, other than `except`, sections and frames looked
 /// into: what a "+" handle dragged onto it joins (#1919).
@@ -272,6 +274,20 @@ pub fn specs() -> Vec<CommandSpec> {
             }
             board_tool(s, ToolId::Highlighter)
         }),
+        spec!(
+            "board.importMermaid",
+            "Import Mermaid flowchart",
+            "{text (a Mermaid flowchart: `flowchart` or `graph` then its nodes and links), x?, y? (its top-left on the page; default centred in the view)} → {ids, shapes, connectors, sections, warnings}  shapes, sections for subgraphs and elbow connectors, laid out in ranks and selected; a shape without an outline of its own gets the nearest one, with a warning. Another kind of diagram, or text that can't be read, adds nothing",
+            true,
+            diagram::import_cmd
+        ),
+        spec!(
+            "board.tidyDiagram",
+            "Tidy diagram",
+            "{ids?, direction? (down|up|right|left; default down)} → {ids, connectors}  lays out the shapes and stickies (those named or selected; with fewer than two selected, all on the page) in ranks along the connectors between them, keeping their top-left corner, and reroutes those connectors",
+            true,
+            diagram::tidy_cmd
+        ),
         spec!("tool.eraser", "Eraser", "{} (drag over marker and highlighter strokes to remove them)", false, |s, _| board_tool(s, ToolId::Eraser)),
         spec!("tool.stamp", "Stamp", "{stamp?} (a click places the stamp)", false, |s, p| {
             if let Some(v) = string(p, "stamp") {
