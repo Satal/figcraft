@@ -36,8 +36,8 @@ const RANK_SEP: f64 = 64.0;
 const SHAPE_FILL: &str = "#FFFFFF";
 const SECTION_FILL: &str = "#F0EFFA";
 /// The most nodes and links one import takes: past this, laying out and routing would stall the app.
-const MAX_NODES: usize = 500;
-const MAX_EDGES: usize = 2_000;
+pub const MAX_NODES: usize = 500;
+pub const MAX_EDGES: usize = 2_000;
 /// A thick (`==>`) line's weight and a dotted (`-.->`) line's dashes.
 const THICK: f64 = 4.0;
 const DOTTED: [f64; 2] = [4.0, 4.0];
@@ -60,6 +60,14 @@ pub fn looks_like_flowchart(text: &str) -> bool {
     matches!(words.next(), Some("flowchart" | "graph"))
         && words.next().is_none_or(|d| matches!(d, "TB" | "TD" | "BT" | "LR" | "RL"))
         && words.next().is_none()
+}
+
+/// The (nodes, links) of Mermaid flowchart `text` when it has more than one import takes
+/// ([`MAX_NODES`], [`MAX_EDGES`]), so a caller can say so in its own words; `None` when it fits or
+/// isn't a flowchart that reads.
+pub fn import_overflow(text: &str) -> Option<(usize, usize)> {
+    let Ok(mm::Diagram::Flowchart(f)) = mm::parse(text) else { return None };
+    (f.nodes.len() > MAX_NODES || f.edges.len() > MAX_EDGES).then_some((f.nodes.len(), f.edges.len()))
 }
 
 pub(super) fn import_cmd(s: &mut Session, p: &Value) -> Result<Value> {

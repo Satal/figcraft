@@ -37,7 +37,7 @@ pub use connectors::{END_HANDLE_PX, selected_connector_ends};
 use connectors::{connector_cmd, reattach};
 pub use derived::route;
 pub(crate) use derived::{settle_routes, settle_stamps, settle_text, stamp_target};
-pub use diagram::looks_like_flowchart;
+pub use diagram::{MAX_EDGES, MAX_NODES, import_overflow, looks_like_flowchart};
 
 /// The topmost sticky or shape at `p` on `page`, other than `except`, sections and frames looked
 /// into: what a "+" handle dragged onto it joins (#1919).
