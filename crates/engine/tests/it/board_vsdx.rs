@@ -183,7 +183,7 @@ fn a_drawing_written_with_glued_connectors_imports_attached() {
             ..vx::Connector::default()
         }],
     };
-    let bytes = vx::write(&vx::Drawing { pages: vec![page] }).unwrap();
+    let bytes = vx::write(&vx::Drawing { pages: vec![page] }).unwrap().0;
     let mut s = board();
     let r = import(&mut s, &bytes).unwrap();
     assert_eq!(r["shapes"], 2);
@@ -214,7 +214,7 @@ fn what_cant_be_carried_across_is_reported() {
     let second = drawing.pages[0].clone();
     drawing.pages.push(second);
     let mut back = board();
-    let r = import(&mut back, &vx::write(&drawing).unwrap()).unwrap();
+    let r = import(&mut back, &vx::write(&drawing).unwrap().0).unwrap();
     assert!(!r["warnings"].as_array().unwrap().is_empty(), "the other page is reported");
     assert!(back.message.is_some(), "and shown to the user");
 }
@@ -282,4 +282,65 @@ fn a_library_shape_lands_inside_the_view_in_one_undo_step() {
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(shapes(&s).len(), before, "one undo takes it away");
     assert!(s.execute("board.insertLibraryShape", &json!({"library": "network", "name": "no such shape"})).is_err());
+}
+
+/// A drawing of one page of `shapes`, and `connectors`, as bytes.
+fn drawing_of(shapes: Vec<vx::Shape>, connectors: Vec<vx::Connector>) -> Vec<u8> {
+    let page = vx::Page { name: "Page-1".into(), width: 800.0, height: 600.0, shapes, connectors };
+    vx::write(&vx::Drawing { pages: vec![page] }).unwrap().0
+}
+
+fn boxed(id: u32, name: &str, x: f64, w: f64) -> vx::Shape {
+    vx::Shape { id, name: name.into(), x, y: 10.0, width: w, height: 40.0, geometry: vec![vx::GeomPath::rect(w, 40.0)], ..Default::default() }
+}
+
+fn warnings(r: &Value) -> Vec<String> {
+    r["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).map(str::to_string).collect()
+}
+
+#[test]
+fn a_foreign_shape_named_like_a_section_is_only_a_shape_but_our_own_sections_return() {
+    let mut s = board();
+    let r = import(&mut s, &drawing_of(vec![boxed(1, "Section", 10.0, 200.0), boxed(2, "Sticky", 300.0, 100.0)], Vec::new())).unwrap();
+    assert_eq!(r["sections"], 0);
+    assert_eq!(r["stickies"], 0);
+    assert_eq!(shapes(&s).len(), 2);
+    // A section FigCraft wrote comes back as one.
+    let mut own = board();
+    own.execute("node.create", &json!({"type": "section", "name": "Plan", "x": 0, "y": 0, "width": 400, "height": 300})).unwrap();
+    let (bytes, _) = export(&mut own);
+    let mut back = board();
+    assert_eq!(import(&mut back, &bytes).unwrap()["sections"], 1);
+}
+
+#[test]
+fn what_an_import_changes_is_reported_once_per_kind_with_a_count() {
+    let tiny: Vec<vx::Shape> = (1..=20).map(|i| vx::Shape { height: 0.2, ..boxed(i, "Box", f64::from(i) * 30.0, 20.0) }).collect();
+    let lines: Vec<vx::Connector> = (1..=20)
+        .map(|i| vx::Connector {
+            id: 100 + i,
+            points: vec![(0.0, f64::from(i) * 10.0), (50.0, f64::from(i) * 10.0)],
+            end_arrow: 5,
+            ..Default::default()
+        })
+        .collect();
+    let mut s = board();
+    let r = import(&mut s, &drawing_of(tiny, lines)).unwrap();
+    let w = warnings(&r);
+    let small: Vec<&String> = w.iter().filter(|w| w.contains("under 1 point")).collect();
+    let arrows: Vec<&String> = w.iter().filter(|w| w.contains("arrowheads")).collect();
+    assert_eq!((small.len(), arrows.len()), (1, 1), "one line per kind: {w:?}");
+    assert!(small[0].starts_with("20 ") && arrows[0].starts_with("20 "), "with the count: {w:?}");
+}
+
+#[test]
+fn connectors_glued_to_layers_that_were_not_exported_are_reported() {
+    let mut s = board();
+    diagram(&mut s);
+    let stamp = id(&s.execute("board.stamp", &json!({"x": 10, "y": 300, "stamp": "heart"})).unwrap());
+    let first = shapes(&s)[0];
+    s.execute("board.connector", &json!({"from": first, "to": stamp})).unwrap();
+    let (_, out) = export(&mut s);
+    let w = warnings(&out);
+    assert!(w.iter().any(|w| w.contains("glued to layers that weren't exported")), "{w:?}");
 }

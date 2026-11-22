@@ -4,7 +4,7 @@
 //! undo step. What can't be carried across is listed in the result's `warnings`, never dropped
 //! without a word.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use base64::Engine as _;
 use craft_vsdx as vx;
@@ -30,10 +30,20 @@ const DASHES: [f64; 2] = [6.0, 4.0];
 const MAX_MATCH_SEGMENTS: usize = 256;
 /// An imported outline of more segments than this is drawn as its box.
 const MAX_OUTLINE_SEGMENTS: usize = 20_000;
-/// What exported sections and stickies are called in the drawing, so they come back as sections
-/// and stickies.
-const SECTION_NAME: &str = "Section";
-const STICKY_NAME: &str = "Sticky";
+/// The most shapes and connectors one import adds; the rest are left out and counted.
+const MAX_LAYERS: usize = 5_000;
+/// How deep exported sections nest.
+const MAX_DEPTH: usize = 32;
+/// What exported sections and stickies are called in the drawing: the marker that brings them
+/// back as sections and stickies. A foreign drawing's shape called "Section" is only a shape.
+const SECTION_NAME: &str = "FigCraft Section";
+const STICKY_NAME: &str = "FigCraft Sticky";
+/// What an imported section with no text is called.
+const SECTION_TITLE: &str = "Section";
+/// A shape whose outline is this close (of its longer side) to a board outline is that outline
+/// to the eye and in effect; one within [`NEAR`] only resembles it.
+const SAME: f64 = 0.005;
+const NEAR: f64 = 0.03;
 
 // ---------------------------------------------------------------------------------------------
 // Geometry both ways.
@@ -243,21 +253,22 @@ fn distance(a: &[Point], b: &[Point]) -> f64 {
     one_way(a, b).max(one_way(b, a))
 }
 
-/// The board outline drawing geometry `paths` in a `w` × `h` box draws, if one does.
-fn matching_shape(paths: &[vx::GeomPath], w: f64, h: f64) -> Option<BoardShape> {
+/// The board outline drawing geometry `paths` in a `w` × `h` box draws, if one does, and whether
+/// it draws it exactly (else only nearly: details such as rounded corners are lost).
+fn matching_shape(paths: &[vx::GeomPath], w: f64, h: f64) -> Option<(BoardShape, bool)> {
     let segments: usize = paths.iter().map(|p| p.segments.len()).sum();
     if segments == 0 || segments > MAX_MATCH_SEGMENTS {
         return None;
     }
     let bez = geom_to_bez(paths)?;
     let mine = samples(&bez, 48);
-    let tol = 0.03 * w.max(h);
+    let long = w.max(h);
     BoardShape::ALL
         .into_iter()
         .map(|s| (s, distance(&mine, &samples(&s.path(w, h), 48))))
-        .filter(|(_, d)| *d <= tol)
+        .filter(|(_, d)| *d <= NEAR * long)
         .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(s, _)| s)
+        .map(|(s, d)| (s, d <= SAME * long))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -289,7 +300,8 @@ pub struct Exported {
 
 /// Board page `page` of `doc` as a one-page drawing.
 pub fn drawing(doc: &Document, page: NodeId) -> Result<Exported> {
-    let mut ex = Export { doc, shapes: Vec::new(), ids: BTreeMap::new(), next: 1, left_out: BTreeMap::new(), notes: Vec::new() };
+    let mut ex =
+        Export { doc, shapes: Vec::new(), ids: BTreeMap::new(), next: 1, left_out: BTreeMap::new(), partial: BTreeMap::new(), notes: Vec::new() };
     let mut connectors = Vec::new();
     ex.walk(page, &mut connectors, 0);
     let mut lines = Vec::new();
@@ -301,6 +313,9 @@ pub fn drawing(doc: &Document, page: NodeId) -> Result<Exported> {
     let mut warnings = ex.notes;
     for (what, n) in &ex.left_out {
         warnings.push(format!("{n} {what} left out: a drawing has no place for them"));
+    }
+    for (what, n) in &ex.partial {
+        warnings.push(format!("{n} {what}"));
     }
     let mut shapes = ex.shapes;
     let (x0, y0, x1, y1) = extent(&shapes, &lines).unwrap_or((0.0, 0.0, 0.0, 0.0));
@@ -327,6 +342,22 @@ fn extent(shapes: &[vx::Shape], lines: &[vx::Connector]) -> Option<(f64, f64, f6
     boxes.chain(points).reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
 }
 
+/// A layer's box in the drawing.
+struct Placed {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    angle: f64,
+    /// Takes the layer's own outline into the box.
+    fit: Affine,
+}
+
+/// Whether the top visible paint is something other than a colour.
+fn not_a_colour(paints: &[Paint]) -> bool {
+    paints.iter().rev().find(|p| p.visible).is_some_and(|p| p.solid_color().is_none())
+}
+
 struct Export<'a> {
     doc: &'a Document,
     shapes: Vec<vx::Shape>,
@@ -335,6 +366,8 @@ struct Export<'a> {
     next: u32,
     /// What was left out, counted by kind.
     left_out: BTreeMap<&'static str, usize>,
+    /// What was kept in part, counted by kind (the whole message after the count).
+    partial: BTreeMap<&'static str, usize>,
     notes: Vec<String>,
 }
 
@@ -347,6 +380,26 @@ impl Export<'_> {
 
     fn skip(&mut self, what: &'static str) {
         *self.left_out.entry(what).or_default() += 1;
+    }
+
+    /// Counts one thing carried across only in part: `what` follows the count in the warning.
+    fn part(&mut self, what: &'static str) {
+        *self.partial.entry(what).or_default() += 1;
+    }
+
+    /// Notes what a drawing can't hold of layer `id`: opacity, effects, and fills that aren't
+    /// a colour.
+    fn lossy(&mut self, id: NodeId) {
+        let Some(n) = self.doc.node(id) else { return };
+        if n.opacity < 1.0 {
+            self.part("layers have an opacity below 100%, which the drawing doesn't keep");
+        }
+        if !n.effects.is_empty() {
+            self.part("layers have effects (shadows, blurs), which the drawing doesn't keep");
+        }
+        if not_a_colour(&n.fills) || not_a_colour(&n.strokes) {
+            self.part("layers have a gradient or image fill or line, drawn with no fill or line");
+        }
     }
 
     /// The layers in `parent`, back to front: sections before what they hold.
@@ -375,8 +428,10 @@ impl Export<'_> {
                 Some(BoardItem::Table) => self.skip("tables"),
                 None if matches!(k.kind, NodeKind::Section { .. }) => {
                     self.filled_box(c, SECTION_NAME, Some(k.name.clone()));
-                    if depth < 32 {
+                    if depth < MAX_DEPTH {
                         self.walk(c, connectors, depth + 1);
+                    } else if !k.children.is_empty() {
+                        self.skip("layers inside sections nested more than 32 deep");
                     }
                 }
                 None if has_image(k) => self.skip("images"),
@@ -391,19 +446,35 @@ impl Export<'_> {
         }
     }
 
-    /// A shape at layer `id`'s box, with its turn: (x, y, width, height, angle).
-    fn place(&self, id: NodeId) -> Option<(f64, f64, f64, f64, f64)> {
+    /// Layer `id`'s box in the drawing and how its own outline lies in it. Scale is applied to
+    /// the box and the outline, a flip to the outline; a skew can't be kept and is counted.
+    fn place(&mut self, id: NodeId) -> Option<Placed> {
         let n = self.doc.node(id)?;
         let t = self.doc.world_transform(id);
-        let [a, b, ..] = t.as_coeffs();
+        let [a, b, c, d, ..] = t.as_coeffs();
+        let (sx, sy) = (a.hypot(b), c.hypot(d));
+        if !(sx.is_finite() && sy.is_finite() && sx > 1e-9 && sy > 1e-9) {
+            self.skip("layers with no size on the page");
+            return None;
+        }
+        if (a * c + b * d).abs() > 1e-6 * sx * sy {
+            self.part("layers are skewed, which the drawing can't hold: they are drawn unskewed");
+        }
+        let (w, h) = (n.width * sx, n.height * sy);
         let centre = t * Point::new(n.width / 2.0, n.height / 2.0);
         let angle = b.atan2(a).to_degrees();
         let angle = if angle.abs() < 1e-9 { 0.0 } else { angle };
-        Some((centre.x - n.width / 2.0, centre.y - n.height / 2.0, n.width, n.height, angle))
+        // A flip runs the outline upside down in its box, which turned by `angle` is the mirror.
+        let fit = if a * d - b * c < 0.0 { Affine::new([sx, 0.0, 0.0, -sy, 0.0, h]) } else { Affine::scale_non_uniform(sx, sy) };
+        Some(Placed { x: centre.x - w / 2.0, y: centre.y - h / 2.0, w, h, angle, fit })
     }
 
     fn push(&mut self, id: NodeId, mut s: vx::Shape) {
         s.id = self.id();
+        self.lossy(id);
+        if !s.text.trim().is_empty() {
+            self.note("text is exported without its font, size, weight or alignment");
+        }
         // Each side's middle: connectors glued to a side keep it.
         s.connections = vec![(s.width / 2.0, 0.0), (s.width, s.height / 2.0), (s.width / 2.0, s.height), (0.0, s.height / 2.0)];
         self.ids.insert(id, self.shapes.len());
@@ -412,7 +483,7 @@ impl Export<'_> {
 
     /// A shape with text: its outline, fill, line and text.
     fn shape(&mut self, id: NodeId) {
-        let Some((x, y, w, h, angle)) = self.place(id) else { return };
+        let Some(Placed { x, y, w, h, angle, fit }) = self.place(id) else { return };
         let doc = self.doc;
         let Some(n) = doc.node(id) else { return };
         let outline = n.children.iter().copied().find(|c| doc.node(*c).is_some_and(|k| matches!(k.kind, NodeKind::Vector { .. })));
@@ -420,7 +491,7 @@ impl Export<'_> {
         match outline.and_then(|o| doc.node(o).map(|k| (o, k))) {
             Some((_, o)) => {
                 let path = match &o.kind {
-                    NodeKind::Vector { network } => o.transform * network.stroke_path(),
+                    NodeKind::Vector { network } => fit * o.transform * network.stroke_path(),
                     _ => BezPath::new(),
                 };
                 s.geometry = bez_to_geom(&path);
@@ -443,7 +514,7 @@ impl Export<'_> {
 
     /// A rectangle filled with layer `id`'s fill (a sticky, a section) and its text, or `title`.
     fn filled_box(&mut self, id: NodeId, name: &str, title: Option<String>) {
-        let Some((x, y, w, h, angle)) = self.place(id) else { return };
+        let Some(Placed { x, y, w, h, angle, .. }) = self.place(id) else { return };
         let Some(n) = self.doc.node(id) else { return };
         let (body, ink) = text(self.doc, id);
         let s = vx::Shape {
@@ -480,8 +551,10 @@ impl Export<'_> {
             }
         });
         if points.len() < 2 {
+            self.skip("connectors with no length");
             return None;
         }
+        self.lossy(id);
         let from = self.glue(c.from);
         let to = self.glue(c.to);
         let label = label_of(doc, id).map(|l| text(doc, l).0).unwrap_or_default();
@@ -508,7 +581,10 @@ impl Export<'_> {
     /// anywhere on it.
     fn glue(&mut self, e: End) -> Option<(u32, vx::ConnectionPoint)> {
         let End::Node { node, side, at } = e else { return None };
-        let i = *self.ids.get(&node)?;
+        let Some(i) = self.ids.get(&node).copied() else {
+            self.part("connector ends are glued to layers that weren't exported, so they are free ends");
+            return None;
+        };
         let s = self.shapes.get_mut(i)?;
         let cp = match (at, side) {
             (Some([fx, fy]), _) => {
@@ -540,8 +616,9 @@ fn text(doc: &Document, id: NodeId) -> (String, Option<vx::Rgba>) {
 
 /// The current board page as VSDX bytes, with the export's counts and warnings.
 pub fn vsdx_bytes(doc: &Document, page: NodeId) -> Result<(Vec<u8>, Exported)> {
-    let ex = drawing(doc, page)?;
-    let bytes = vx::write(&ex.drawing).map_err(|e| EngineError::Other(format!("the drawing can't be written: {e}")))?;
+    let mut ex = drawing(doc, page)?;
+    let (bytes, written) = vx::write(&ex.drawing).map_err(|e| EngineError::Other(format!("the drawing can't be written: {e}")))?;
+    ex.warnings.extend(written.iter().map(ToString::to_string));
     Ok((bytes, ex))
 }
 
@@ -620,7 +697,7 @@ pub(crate) fn import_bytes(s: &mut Session, bytes: &[u8], index: usize, at: Opti
         return Err(bad(cmd, format!("the drawing has {pages} page(s), so there's no page {index}: nothing was added")));
     };
     if pages > 1 {
-        warnings.push(format!("the drawing has {pages} pages: only page {} (`{}`) was added", index + 1, page.name));
+        warnings.push(format!("the drawing has {pages} pages: only page {} (`{}`) was added", index + 1, short(&page.name)));
     }
     if page.shapes.is_empty() && page.connectors.is_empty() {
         return Err(bad(cmd, "the drawing's page is empty: nothing was added"));
@@ -635,22 +712,45 @@ pub(crate) fn import_bytes(s: &mut Session, bytes: &[u8], index: usize, at: Opti
     };
     let offset = Vec2::new(origin.0 - x0, origin.1 - y0);
     let board_page = s.page()?;
-    let mut im = Import { s, page: board_page, offset, made: Vec::new(), ids: BTreeMap::new(), sections: Vec::new(), warnings };
+    let by_id: HashMap<u32, &vx::Shape> = page.shapes.iter().map(|sh| (sh.id, sh)).collect();
+    let mut im = Import {
+        s,
+        page: board_page,
+        offset,
+        made: Vec::new(),
+        ids: BTreeMap::new(),
+        sections: Vec::new(),
+        warnings,
+        counts: BTreeMap::new(),
+        by_id,
+    };
     let mut counts = (0, 0, 0, 0);
+    let mut room = MAX_LAYERS;
     for shape in &page.shapes {
+        if room == 0 {
+            im.count("shapes were left out: a page imports at most 5000 shapes and connectors");
+            continue;
+        }
+        room -= 1;
         match im.shape(shape) {
             Ok(Kind::Shape) => counts.0 += 1,
             Ok(Kind::Section) => counts.2 += 1,
             Ok(Kind::Sticky) => counts.3 += 1,
-            Err(e) => im.warnings.push(format!("shape {} (`{}`): not added ({e})", shape.id, shape.name)),
+            Err(e) => im.warnings.push(format!("shape {} (`{}`): not added ({e})", shape.id, short(&shape.name))),
         }
     }
     for c in &page.connectors {
-        match im.connector(c, &page.shapes) {
+        if room == 0 {
+            im.count("connectors were left out: a page imports at most 5000 shapes and connectors");
+            continue;
+        }
+        room -= 1;
+        match im.connector(c) {
             Ok(()) => counts.1 += 1,
             Err(e) => im.warnings.push(format!("connector {}: not added ({e})", c.id)),
         }
     }
+    im.finish();
     let Import { made, warnings, .. } = im;
     if made.is_empty() {
         return Err(bad(cmd, format!("nothing on the drawing's page could be added ({})", warnings.join("; "))));
@@ -678,8 +778,12 @@ enum Kind {
     Sticky,
 }
 
-struct Import<'a> {
+struct Import<'a, 'p> {
     s: &'a mut Session,
+    /// The page's shapes by drawing id.
+    by_id: HashMap<u32, &'p vx::Shape>,
+    /// What was carried across in part, counted by kind (the words after the count).
+    counts: BTreeMap<&'static str, usize>,
     page: NodeId,
     offset: Vec2,
     made: Vec<NodeId>,
@@ -697,12 +801,30 @@ pub(super) fn run(s: &mut Session, cmd: &str, p: &Value) -> Result<NodeId> {
     v.get("id").and_then(id_of).ok_or_else(|| EngineError::Other(format!("`{cmd}` made no layer")))
 }
 
+/// `text` cut to a length a warning can hold.
+fn short(text: &str) -> String {
+    const MAX: usize = 48;
+    if text.chars().nth(MAX).is_some() { format!("{}...", text.chars().take(MAX).collect::<String>()) } else { text.to_string() }
+}
+
 /// A size a board object can have.
 fn size_ok(v: f64) -> bool {
     v.is_finite() && (1.0..=100_000.0).contains(&v)
 }
 
-impl Import<'_> {
+impl Import<'_, '_> {
+    /// Counts one thing that didn't come across exactly: `what` follows the count in its warning.
+    fn count(&mut self, what: &'static str) {
+        *self.counts.entry(what).or_default() += 1;
+    }
+
+    /// Turns the counts into one warning per kind.
+    fn finish(&mut self) {
+        for (what, n) in std::mem::take(&mut self.counts) {
+            self.warnings.push(format!("{n} {what}"));
+        }
+    }
+
     /// Where a box at drawing point `(x, y)` goes: the innermost section holding all of `r`, and
     /// the place in it (or on the page).
     fn parent_for(&self, r: Rect) -> (NodeId, Point) {
@@ -718,6 +840,9 @@ impl Import<'_> {
         if !(size_ok(sh.width.max(1.0)) && size_ok(sh.height.max(1.0))) {
             return Err(EngineError::Other("its size is out of range".into()));
         }
+        if sh.width < 1.0 || sh.height < 1.0 {
+            self.count("shapes were under 1 point across and were enlarged to 1");
+        }
         let (w, h) = (sh.width.max(1.0), sh.height.max(1.0));
         let at = Point::new(sh.x, sh.y) + self.offset;
         if !(at.x.is_finite() && at.y.is_finite()) {
@@ -727,9 +852,9 @@ impl Import<'_> {
         let (parent, local) = self.parent_for(r);
         let fill = sh.fill.map(colour);
         let base = sh.name.split('.').next().unwrap_or("");
-        let plain_box = sh.angle == 0.0 && matching_shape(&sh.geometry, w, h) == Some(BoardShape::Rectangle);
+        let plain_box = sh.angle == 0.0 && matches!(matching_shape(&sh.geometry, w, h), Some((BoardShape::Rectangle, true)));
         let (id, kind) = if base == SECTION_NAME && plain_box {
-            let title = if sh.text.trim().is_empty() { SECTION_NAME.to_string() } else { sh.text.trim().to_string() };
+            let title = if sh.text.trim().is_empty() { SECTION_TITLE.to_string() } else { sh.text.trim().to_string() };
             let mut p = json!({"type": "section", "name": title, "width": w, "height": h, "parent": parent, "x": local.x, "y": local.y});
             if let Some(c) = fill {
                 p["props"] = json!({"fills": [c.to_hex()]});
@@ -756,7 +881,14 @@ impl Import<'_> {
     /// A shape with text for drawing shape `sh`: a board outline when its geometry draws one, else
     /// its own outline.
     fn outline_shape(&mut self, sh: &vx::Shape, parent: NodeId, at: Point, (w, h): (f64, f64)) -> Result<NodeId> {
-        let matched = matching_shape(&sh.geometry, w, h);
+        let found = matching_shape(&sh.geometry, w, h);
+        let matched = found.map(|(b, _)| b);
+        if matches!(found, Some((_, false))) {
+            self.count("shapes only resemble a board shape and are drawn as it, so details such as rounded corners are lost");
+        }
+        if sh.geometry.iter().any(|g| g.no_line || (g.no_fill && g.closed)) {
+            self.count("shapes have parts with no line or no fill of their own, which are drawn with the shape's line and fill");
+        }
         let fill = sh.fill.map(colour);
         let p = json!({
             "shape": matched.unwrap_or(BoardShape::Rectangle).id(),
@@ -765,7 +897,21 @@ impl Import<'_> {
             "parent": parent, "x": at.x, "y": at.y,
         });
         let id = run(self.s, "board.shape", &p)?;
-        let doc = self.s.doc_mut()?;
+        match self.finish_shape(id, sh, matched, at, (w, h)) {
+            Ok(()) => Ok(id),
+            Err(e) => {
+                // Not added means not left behind.
+                if !self.s.doc_mut().is_ok_and(|doc| doc.remove(id).is_ok()) {
+                    self.count("shapes failed part-way and could not be taken off the board again");
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Gives the new shape layer `id` its outline, style and turn.
+    fn finish_shape(&mut self, id: NodeId, sh: &vx::Shape, matched: Option<BoardShape>, at: Point, (w, h): (f64, f64)) -> Result<()> {
+        let mut outline = None;
         if matched.is_none() {
             let segments: usize = sh.geometry.iter().map(|g| g.segments.len()).sum();
             let path = if sh.geometry.is_empty() {
@@ -774,10 +920,18 @@ impl Import<'_> {
                 self.warnings.push(format!("shape {}: its outline has {segments} segments and is drawn as its box", sh.id));
                 Some(Rect::new(0.0, 0.0, w, h).to_path(0.1))
             } else {
-                geom_to_bez(&sh.geometry)
+                let bez = geom_to_bez(&sh.geometry);
+                if bez.is_none() {
+                    self.count("shapes have an outline with a value that isn't a number and are drawn as their box");
+                }
+                bez
             };
+            outline = Some(path.unwrap_or_else(|| Rect::new(0.0, 0.0, w, h).to_path(0.1)));
+        }
+        let doc = self.s.doc_mut()?;
+        if let Some(path) = outline {
             let name = sh.master.clone().filter(|m| !m.trim().is_empty());
-            custom_outline(doc, id, &path.unwrap_or_else(|| Rect::new(0.0, 0.0, w, h).to_path(0.1)), name.as_deref())?;
+            custom_outline(doc, id, &path, name.as_deref())?;
         }
         style_shape(doc, id, sh);
         if sh.angle != 0.0
@@ -787,16 +941,16 @@ impl Import<'_> {
             let centre = Vec2::new(at.x + w / 2.0, at.y + h / 2.0);
             n.transform = Affine::translate(centre) * Affine::rotate(sh.angle.to_radians()) * Affine::translate((-w / 2.0, -h / 2.0));
         }
-        Ok(id)
+        Ok(())
     }
 
     /// Connector `c`: glued ends attached to their shapes, free ones at their points.
-    fn connector(&mut self, c: &vx::Connector, shapes: &[vx::Shape]) -> Result<()> {
+    fn connector(&mut self, c: &vx::Connector) -> Result<()> {
         let (Some(first), Some(last)) = (c.points.first(), c.points.last()) else {
             return Err(EngineError::Other("it has no route".into()));
         };
-        let from = self.end(c.from, *first, shapes, c.id);
-        let to = self.end(c.to, *last, shapes, c.id);
+        let from = self.end(c.from, *first, c.id);
+        let to = self.end(c.to, *last, c.id);
         let points: Vec<Point> = c.points.iter().map(|p| pt(*p) + self.offset).collect();
         let orthogonal = points.len() >= 3 && points.windows(2).all(|w| (w[0].x - w[1].x).abs() < 0.01 || (w[0].y - w[1].y).abs() < 0.01);
         let glued = matches!(from, End::Node { .. }) || matches!(to, End::Node { .. });
@@ -804,6 +958,9 @@ impl Import<'_> {
             self.warnings.push(format!("connector {}: its bends aren't at right angles, so it is drawn straight", c.id));
         }
         let style = if orthogonal { "elbow" } else { "straight" };
+        if [c.begin_arrow, c.end_arrow].iter().any(|a| !matches!(*a, 0 | vx::ARROW)) {
+            self.count("connectors have arrowheads of other kinds, drawn as triangle arrowheads");
+        }
         let cap = |a: u8| if a == 0 { "none" } else { "triangleArrow" };
         let mut p = json!({
             "from": end_json(from), "to": end_json(to), "style": style,
@@ -845,7 +1002,7 @@ impl Import<'_> {
 
     /// A connector end: glued to drawing shape `glue` (its side or connection point), or free at
     /// `point`.
-    fn end(&mut self, glue: Option<(u32, vx::ConnectionPoint)>, point: vx::Point, shapes: &[vx::Shape], who: u32) -> End {
+    fn end(&mut self, glue: Option<(u32, vx::ConnectionPoint)>, point: vx::Point, who: u32) -> End {
         let free = || {
             let p = pt(point) + self.offset;
             End::Point { x: p.x, y: p.y }
@@ -856,7 +1013,7 @@ impl Import<'_> {
             return free();
         };
         let vx::ConnectionPoint::Point(n) = cp else { return End::Node { node, side: Side::Auto, at: None } };
-        let Some(sh) = shapes.iter().find(|s| s.id == sid) else { return End::Node { node, side: Side::Auto, at: None } };
+        let Some(sh) = self.by_id.get(&sid).copied() else { return End::Node { node, side: Side::Auto, at: None } };
         let Some(c) = usize::try_from(n).ok().and_then(|n| n.checked_sub(1)).and_then(|i| sh.connections.get(i)) else {
             return End::Node { node, side: Side::Auto, at: None };
         };

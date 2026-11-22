@@ -3,6 +3,7 @@
 //! preferences. `board.insertLibraryShape` adds one of their shapes to the board.
 
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use craft_vsdx as vx;
 use figcraft_color::{Color, Paint};
@@ -37,7 +38,7 @@ pub struct LibraryShape {
     pub fill: Option<Color>,
     pub line: Option<Color>,
     /// A stencil master's PNG icon, if it has one.
-    pub icon_png: Option<Vec<u8>>,
+    pub icon_png: Option<std::sync::Arc<[u8]>>,
 }
 
 /// A shape library: built in, or a VSSX stencil read from `path`.
@@ -50,6 +51,15 @@ pub struct ShapeLibrary {
     pub shapes: Vec<LibraryShape>,
     /// Why a stencil kept in preferences couldn't be read again.
     pub error: Option<String>,
+    /// Changes whenever the library's content is read again (0 for built-in ones), so a cache
+    /// of what is drawn from it can tell a reloaded stencil from the one it replaced.
+    pub revision: u64,
+}
+
+/// The revision of the next library read.
+fn next_revision() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// SVG path data in a 100 × 100 box, drawn at `w` × `h`.
@@ -140,7 +150,15 @@ static BUILT_IN: LazyLock<Vec<ShapeLibrary>> = LazyLock::new(|| {
             }
         })
         .collect();
-    let lib = |id: &str, name: &str, shapes| ShapeLibrary { id: id.into(), name: name.into(), path: None, built_in: true, shapes, error: None };
+    let lib = |id: &str, name: &str, shapes| ShapeLibrary {
+        id: id.into(),
+        name: name.into(),
+        path: None,
+        built_in: true,
+        shapes,
+        error: None,
+        revision: 0,
+    };
     vec![
         lib("flowchart", "Flowchart", flowchart),
         lib("network", "Network", drawn(NETWORK)),
@@ -186,6 +204,7 @@ fn sync(s: &mut Session) {
                 built_in: false,
                 shapes: Vec::new(),
                 error: Some(e),
+                revision: next_revision(),
             },
         };
         let mut lib = lib;
@@ -227,8 +246,21 @@ fn stencil(bytes: &[u8], name: &str) -> std::result::Result<(ShapeLibrary, Vec<S
     if shapes.is_empty() {
         return Err("the stencil has no shapes that can be drawn".to_string());
     }
+    let flattened = st.masters.iter().take(MAX_SHAPES).filter(|m| flattens(m)).count();
+    if flattened > 0 {
+        warnings.push(format!(
+            "{flattened} shapes have several parts, colours or text: they are drawn as one outline with the first fill and line colour, and their text is left out"
+        ));
+    }
     let stem = stem(name);
-    Ok((ShapeLibrary { id: stem.clone(), name: stem, path: None, built_in: false, shapes, error: None }, warnings))
+    Ok((ShapeLibrary { id: stem.clone(), name: stem, path: None, built_in: false, shapes, error: None, revision: next_revision() }, warnings))
+}
+
+/// Whether drawing master `m` as one outline loses something: parts with different fills or
+/// lines, or text.
+fn flattens(m: &vx::Master) -> bool {
+    let drawn: Vec<&vx::Shape> = m.shapes.iter().filter(|s| !s.geometry.is_empty()).collect();
+    drawn.windows(2).any(|w| w[0].fill != w[1].fill || w[0].line != w[1].line) || m.shapes.iter().any(|s| !s.text.trim().is_empty())
 }
 
 /// A stencil master as a library shape: its sub-shapes' outlines in one path in its box.
