@@ -28,6 +28,7 @@ use color_profile::color_profile_dialog;
 use export::export_dialog;
 pub(crate) use export::file_saved;
 pub use menu_input::MenuInput;
+pub(crate) use menu_input::import_mermaid;
 use menu_input::menu_input_dialog;
 pub mod branch_ui;
 pub mod credits;

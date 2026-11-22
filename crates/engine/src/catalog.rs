@@ -32,6 +32,8 @@ pub static MENU: &[MenuItem] = &[
     m!("File", "New window", "window.new"),
     m!("File", "Open…", "file.open"),
     m!("File", "Import from file…", "file.import"),
+    // FigCraft's own (in `OWN`): a flowchart written as text, onto a board.
+    m!("File", "Import Mermaid flowchart…", "board.importMermaid"),
     m!("File", "Place image…", "file.placeImage"),
     m!("File", SEP, ""),
     m!("File", "Save", "file.save"),
@@ -238,6 +240,8 @@ pub static MENU: &[MenuItem] = &[
     m!("Arrange", "Distribute horizontal spacing", "distribute.horizontal"),
     m!("Arrange", "Distribute vertical spacing", "distribute.vertical"),
     m!("Arrange", "Tidy up", "arrange.tidy"),
+    // FigCraft's own (in `OWN`): a board's shapes in ranks along their connectors.
+    m!("Arrange", "Tidy diagram", "board.tidyDiagram"),
     m!("Arrange", SEP, ""),
     m!("Arrange", "Pack horizontal", "arrange.packH"),
     m!("Arrange", "Pack vertical", "arrange.packV"),
@@ -302,7 +306,16 @@ pub fn items() -> impl Iterator<Item = &'static MenuItem> {
 }
 
 /// Items of FigCraft's own that the parity count leaves out (as it does the `collab.` ones).
-const OWN: [&str; 6] = ["file.newFromTemplate", "file.newBoard", "help.gettingStarted", "text.missingFonts", "image.crop", "text.directionAuto"];
+const OWN: [&str; 8] = [
+    "board.importMermaid",
+    "board.tidyDiagram",
+    "file.newFromTemplate",
+    "file.newBoard",
+    "help.gettingStarted",
+    "text.missingFonts",
+    "image.crop",
+    "text.directionAuto",
+];
 
 /// Coverage: (implemented, total, missing ids). `extra` lists ids implemented by the UI layer.
 pub fn parity(extra: &[&str]) -> (usize, usize, Vec<&'static str>) {

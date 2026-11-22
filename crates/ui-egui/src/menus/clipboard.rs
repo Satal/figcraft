@@ -126,6 +126,9 @@ fn paste_text(app: &mut FigApp, text: &str, (cx, cy): (f64, f64), center: bool) 
                 &[("rows", &rows.to_string()), ("columns", &columns.to_string())],
             ));
         }
+    } else if board && figcraft_engine::board::looks_like_flowchart(text) {
+        // Centred in the view, or (Paste here) its top-left at the point.
+        crate::dialogs::import_mermaid(app, text, (!center).then_some((cx, cy)));
     } else if figcraft_engine::looks_like_svg(text) {
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());

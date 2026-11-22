@@ -172,6 +172,11 @@ pub fn invoke(app: &mut FigApp, id: &str) {
         "text.link" => app.ui.menu_input = Some(crate::dialogs::MenuInput::Link(String::new())),
         "vector.offset" => app.ui.menu_input = Some(crate::dialogs::MenuInput::Offset(0.0)),
         "object.moveToPage" => app.ui.menu_input = Some(crate::dialogs::MenuInput::MoveToPage),
+        // On a design file the command itself says it is for boards.
+        "board.importMermaid" if !app.session.doc().is_ok_and(figcraft_engine::board::is_board) => {
+            app.run(id, json!({"text": ""}));
+        }
+        "board.importMermaid" => app.ui.menu_input = Some(crate::dialogs::MenuInput::Mermaid(String::new())),
         "object.batchRename" => {
             let ids = app.session.selection();
             if !ids.is_empty() {
